@@ -2,6 +2,12 @@
 name = "clawket"
 version = "2.2.1"
 edition = "2024"
+description = "Clawket CLI — Rust command-line interface for the Clawket work management daemon"
+license = "MIT"
+repository = "https://github.com/clawket/cli"
+homepage = "https://github.com/clawket/clawket"
+keywords = ["clawket", "cli", "task-management"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
