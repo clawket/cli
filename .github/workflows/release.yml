@@ -27,9 +27,8 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             cross: true
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
+          # Windows target tracked as known-unsupported — CLI uses UnixStream + libc::kill.
+          # Port to std::os::windows::net::* and Win32 kill before re-enabling.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
