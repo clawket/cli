@@ -1,13 +1,13 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 use anyhow::{Context as AnyhowCtx, Result, bail};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use crate::paths;
 
@@ -20,7 +20,8 @@ pub struct UnixConnector {
 impl tower::Service<hyper::Uri> for UnixConnector {
     type Response = TokioIo<tokio::net::UnixStream>;
     type Error = std::io::Error;
-    type Future = Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
+    type Future =
+        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -53,7 +54,12 @@ pub async fn get(client: &HttpClient, path: &str) -> Result<serde_json::Value> {
     let body = resp.into_body().collect().await?.to_bytes();
     let val: serde_json::Value = serde_json::from_slice(&body)?;
     if !status.is_success() {
-        bail!("{}", val.get("error").and_then(|e| e.as_str()).unwrap_or("unknown error"));
+        bail!(
+            "{}",
+            val.get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("unknown error")
+        );
     }
     Ok(val)
 }
@@ -64,7 +70,9 @@ pub async fn request(
     path: &str,
     json_body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value> {
-    let uri: hyper::Uri = format!("http://localhost{path}").parse().context("invalid URI")?;
+    let uri: hyper::Uri = format!("http://localhost{path}")
+        .parse()
+        .context("invalid URI")?;
     let mut builder = Request::builder().method(method).uri(uri);
 
     let body = if let Some(json) = json_body {
@@ -87,7 +95,12 @@ pub async fn request(
     }
     let val: serde_json::Value = serde_json::from_slice(&body_bytes)?;
     if !status.is_success() {
-        bail!("{}", val.get("error").and_then(|e| e.as_str()).unwrap_or("unknown error"));
+        bail!(
+            "{}",
+            val.get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("unknown error")
+        );
     }
     Ok(val)
 }

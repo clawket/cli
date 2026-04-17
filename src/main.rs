@@ -1,16 +1,20 @@
 mod client;
-mod paths;
-mod daemon;
 mod codex;
-mod runtime;
+mod daemon;
 mod mcp;
+mod paths;
+mod runtime;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 
 #[derive(Parser)]
-#[command(name = "clawket", version, about = "LLM-native work management CLI for Claude Code.\n\nWorkflow: Project → Plan (approve) → Unit → Task (backlog) → Cycle (activate) → Start\n\nPlan must be approved (draft → active) before tasks can be started.\nTasks can be created without a cycle (goes to backlog).\nStarting a task (in_progress) requires an assigned active cycle.\nCycle must be activated (planning → active) before tasks can be started.\nUnit is a pure grouping entity with no status.\nTask is the only entity managed directly: todo → in_progress → done/cancelled.\nCompleted cycles cannot be restarted — create a new one.\n\nQuick start:\n  clawket project create \"my-app\" --cwd .\n  clawket plan create --project PROJ-my-app \"MVP\"\n  clawket plan approve PLAN-xxx\n  clawket unit create --plan PLAN-xxx \"Unit 1\"\n  clawket task create \"Build login\" --assignee main          # goes to backlog\n  clawket cycle create --project PROJ-my-app \"Sprint 1\"\n  clawket cycle activate CYC-xxx\n  clawket task update TASK-xxx --cycle CYC-xxx             # assign to cycle\n  clawket task update TASK-xxx --status in_progress\n  clawket task update TASK-xxx --status done")]
+#[command(
+    name = "clawket",
+    version,
+    about = "LLM-native work management CLI for Claude Code.\n\nWorkflow: Project → Plan (approve) → Unit → Task (backlog) → Cycle (activate) → Start\n\nPlan must be approved (draft → active) before tasks can be started.\nTasks can be created without a cycle (goes to backlog).\nStarting a task (in_progress) requires an assigned active cycle.\nCycle must be activated (planning → active) before tasks can be started.\nUnit is a pure grouping entity with no status.\nTask is the only entity managed directly: todo → in_progress → done/cancelled.\nCompleted cycles cannot be restarted — create a new one.\n\nQuick start:\n  clawket project create \"my-app\" --cwd .\n  clawket plan create --project PROJ-my-app \"MVP\"\n  clawket plan approve PLAN-xxx\n  clawket unit create --plan PLAN-xxx \"Unit 1\"\n  clawket task create \"Build login\" --assignee main          # goes to backlog\n  clawket cycle create --project PROJ-my-app \"Sprint 1\"\n  clawket cycle activate CYC-xxx\n  clawket task update TASK-xxx --cycle CYC-xxx             # assign to cycle\n  clawket task update TASK-xxx --status in_progress\n  clawket task update TASK-xxx --status done"
+)]
 struct Cli {
     /// Output format: json (default), table, yaml
     #[arg(long, global = true, default_value = "json")]
@@ -793,7 +797,8 @@ enum CommentAction {
 fn strip_nulls(val: &serde_json::Value) -> serde_json::Value {
     match val {
         serde_json::Value::Object(map) => {
-            let filtered: serde_json::Map<String, serde_json::Value> = map.iter()
+            let filtered: serde_json::Map<String, serde_json::Value> = map
+                .iter()
                 .filter(|(_, v)| !v.is_null())
                 .map(|(k, v)| (k.clone(), strip_nulls(v)))
                 .collect();
@@ -820,46 +825,87 @@ fn print_table(val: &serde_json::Value) {
             if let Some(first) = arr[0].as_object() {
                 let keys: Vec<&String> = first.keys().collect();
                 // Filter out long fields
-                let visible: Vec<&&String> = keys.iter()
+                let visible: Vec<&&String> = keys
+                    .iter()
                     .filter(|k| !["body", "content", "depends_on"].contains(&k.as_str()))
                     .collect();
                 let headers: Vec<&str> = visible.iter().map(|k| k.as_str()).collect();
-                let rows: Vec<Vec<String>> = arr.iter().map(|item| {
-                    visible.iter().map(|k| {
-                        let v = item.get(k.as_str()).unwrap_or(&serde_json::Value::Null);
-                        let s = match v {
-                            serde_json::Value::Null => String::new(),
-                            serde_json::Value::String(s) => s.clone(),
-                            serde_json::Value::Number(n) => n.to_string(),
-                            serde_json::Value::Bool(b) => b.to_string(),
-                            _ => serde_json::to_string(v).unwrap_or_default(),
-                        };
-                        if s.chars().count() > 50 {
-                            let truncated: String = s.chars().take(47).collect();
-                            format!("{}...", truncated)
-                        } else { s }
-                    }).collect()
-                }).collect();
+                let rows: Vec<Vec<String>> = arr
+                    .iter()
+                    .map(|item| {
+                        visible
+                            .iter()
+                            .map(|k| {
+                                let v = item.get(k.as_str()).unwrap_or(&serde_json::Value::Null);
+                                let s = match v {
+                                    serde_json::Value::Null => String::new(),
+                                    serde_json::Value::String(s) => s.clone(),
+                                    serde_json::Value::Number(n) => n.to_string(),
+                                    serde_json::Value::Bool(b) => b.to_string(),
+                                    _ => serde_json::to_string(v).unwrap_or_default(),
+                                };
+                                if s.chars().count() > 50 {
+                                    let truncated: String = s.chars().take(47).collect();
+                                    format!("{}...", truncated)
+                                } else {
+                                    s
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
                 // Compute widths (use Unicode display width for CJK chars)
                 fn display_width(s: &str) -> usize {
                     s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
                 }
                 fn pad_to_width(s: &str, target: usize) -> String {
                     let w = display_width(s);
-                    if w >= target { s.to_string() } else { format!("{}{}", s, " ".repeat(target - w)) }
+                    if w >= target {
+                        s.to_string()
+                    } else {
+                        format!("{}{}", s, " ".repeat(target - w))
+                    }
                 }
-                let widths: Vec<usize> = headers.iter().enumerate().map(|(i, h)| {
-                    let max_row = rows.iter().map(|r| r.get(i).map_or(0, |c| display_width(c))).max().unwrap_or(0);
-                    display_width(h).max(max_row)
-                }).collect();
-                let sep: String = format!("+{}+", widths.iter().map(|w| "-".repeat(w + 2)).collect::<Vec<_>>().join("+"));
+                let widths: Vec<usize> = headers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| {
+                        let max_row = rows
+                            .iter()
+                            .map(|r| r.get(i).map_or(0, |c| display_width(c)))
+                            .max()
+                            .unwrap_or(0);
+                        display_width(h).max(max_row)
+                    })
+                    .collect();
+                let sep: String = format!(
+                    "+{}+",
+                    widths
+                        .iter()
+                        .map(|w| "-".repeat(w + 2))
+                        .collect::<Vec<_>>()
+                        .join("+")
+                );
                 let fmt_row = |cells: &[String]| -> String {
-                    format!("| {} |", cells.iter().enumerate().map(|(i, c)| pad_to_width(c, widths[i])).collect::<Vec<_>>().join(" | "))
+                    format!(
+                        "| {} |",
+                        cells
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| pad_to_width(c, widths[i]))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    )
                 };
                 println!("{}", sep);
-                println!("{}", fmt_row(&headers.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+                println!(
+                    "{}",
+                    fmt_row(&headers.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+                );
                 println!("{}", sep);
-                for row in &rows { println!("{}", fmt_row(row)); }
+                for row in &rows {
+                    println!("{}", fmt_row(row));
+                }
                 println!("{}", sep);
             }
         }
@@ -870,7 +916,15 @@ fn print_table(val: &serde_json::Value) {
                     serde_json::Value::Null => String::new(),
                     _ => serde_json::to_string(v).unwrap_or_default(),
                 };
-                println!("{}: {}", k, if s.len() > 80 { format!("{}...", &s[..77]) } else { s });
+                println!(
+                    "{}: {}",
+                    k,
+                    if s.len() > 80 {
+                        format!("{}...", &s[..77])
+                    } else {
+                        s
+                    }
+                );
             }
         }
         _ => println!("{}", serde_json::to_string(val).unwrap()),
@@ -922,7 +976,11 @@ fn query_string(params: &[(&str, &Option<String>)]) -> String {
         .iter()
         .filter_map(|(k, v)| v.as_ref().map(|val| format!("{}={}", k, urlenc(val))))
         .collect();
-    if pairs.is_empty() { String::new() } else { format!("?{}", pairs.join("&")) }
+    if pairs.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", pairs.join("&"))
+    }
 }
 
 fn urlenc(s: &str) -> String {
@@ -974,7 +1032,9 @@ async fn main() -> Result<()> {
         Command::Daemon { .. } => unreachable!(),
         Command::Runtime { action } => match action {
             RuntimeAction::List => output(&runtime::list_runtimes()),
-            RuntimeAction::Doctor { runtime: runtime_name } => {
+            RuntimeAction::Doctor {
+                runtime: runtime_name,
+            } => {
                 let rt = if runtime_name == "claude" {
                     runtime::RuntimeName::Claude
                 } else {
@@ -983,7 +1043,9 @@ async fn main() -> Result<()> {
                 output(&runtime::doctor(rt));
             }
         },
-        Command::Codex { action: Some(action) } => match action {
+        Command::Codex {
+            action: Some(action),
+        } => match action {
             CodexAction::Install => output(&codex::install()?),
             CodexAction::Uninstall => output(&codex::uninstall()?),
             CodexAction::Status => output(&codex::status()?),
@@ -994,7 +1056,12 @@ async fn main() -> Result<()> {
         Command::Mcp => unreachable!(),
 
         Command::Dashboard { cwd, show } => {
-            let cwd = cwd.unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+            let cwd = cwd.unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            });
             let qs = format!("?cwd={}&show={}", urlenc(&cwd), urlenc(&show));
             let val = client::get(&c, &format!("/dashboard{qs}")).await?;
             // Print the context string directly (not JSON) for hook injection
@@ -1005,36 +1072,88 @@ async fn main() -> Result<()> {
 
         // ===== Project =====
         Command::Project { action } => match action {
-            ProjectAction::Create { name, description, cwd, key } => {
-                let cwd = cwd.or_else(|| Some(std::env::current_dir().unwrap().to_string_lossy().to_string()));
-                let val = client::request(&c, "POST", "/projects", Some(json!({
-                    "name": name, "description": description, "cwd": cwd, "key": key
-                }))).await?;
+            ProjectAction::Create {
+                name,
+                description,
+                cwd,
+                key,
+            } => {
+                let cwd = cwd.or_else(|| {
+                    Some(
+                        std::env::current_dir()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string(),
+                    )
+                });
+                let val = client::request(
+                    &c,
+                    "POST",
+                    "/projects",
+                    Some(json!({
+                        "name": name, "description": description, "cwd": cwd, "key": key
+                    })),
+                )
+                .await?;
                 output(&val);
             }
-            ProjectAction::View { id } => output(&client::get(&c, &format!("/projects/{id}")).await?),
+            ProjectAction::View { id } => {
+                output(&client::get(&c, &format!("/projects/{id}")).await?)
+            }
             ProjectAction::List => output(&client::get(&c, "/projects").await?),
-            ProjectAction::Update { id, name, description, wiki_paths } => {
+            ProjectAction::Update {
+                id,
+                name,
+                description,
+                wiki_paths,
+            } => {
                 let mut body = json!({});
-                if let Some(v) = name { body["name"] = json!(v); }
-                if let Some(v) = description { body["description"] = json!(v); }
+                if let Some(v) = name {
+                    body["name"] = json!(v);
+                }
+                if let Some(v) = description {
+                    body["description"] = json!(v);
+                }
                 if let Some(v) = wiki_paths {
-                    let parsed: serde_json::Value = serde_json::from_str(&v)
-                        .unwrap_or_else(|_| json!([v]));
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(&v).unwrap_or_else(|_| json!([v]));
                     body["wiki_paths"] = parsed;
                 }
-                output(&client::request(&c, "PATCH", &format!("/projects/{id}"), Some(body)).await?);
+                output(
+                    &client::request(&c, "PATCH", &format!("/projects/{id}"), Some(body)).await?,
+                );
             }
             ProjectAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/projects/{id}"), None).await?);
             }
             ProjectAction::Cwd { action } => match action {
                 ProjectCwdAction::Add { id, path } => {
-                    let cwd = path.unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
-                    output(&client::request(&c, "POST", &format!("/projects/{id}/cwds"), Some(json!({"cwd": cwd}))).await?);
+                    let cwd = path.unwrap_or_else(|| {
+                        std::env::current_dir()
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string()
+                    });
+                    output(
+                        &client::request(
+                            &c,
+                            "POST",
+                            &format!("/projects/{id}/cwds"),
+                            Some(json!({"cwd": cwd})),
+                        )
+                        .await?,
+                    );
                 }
                 ProjectCwdAction::Remove { id, path } => {
-                    output(&client::request(&c, "DELETE", &format!("/projects/{id}/cwds"), Some(json!({"cwd": path}))).await?);
+                    output(
+                        &client::request(
+                            &c,
+                            "DELETE",
+                            &format!("/projects/{id}/cwds"),
+                            Some(json!({"cwd": path})),
+                        )
+                        .await?,
+                    );
                 }
                 ProjectCwdAction::List { id } => {
                     let proj = client::get(&c, &format!("/projects/{id}")).await?;
@@ -1049,22 +1168,47 @@ async fn main() -> Result<()> {
 
         // ===== Plan =====
         Command::Plan { action } => match action {
-            PlanAction::Create { title, project, description, source, source_path } => {
-                output(&client::request(&c, "POST", "/plans", Some(json!({
-                    "project_id": project, "title": title, "description": description,
-                    "source": source, "source_path": source_path,
-                }))).await?);
+            PlanAction::Create {
+                title,
+                project,
+                description,
+                source,
+                source_path,
+            } => {
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/plans",
+                        Some(json!({
+                            "project_id": project, "title": title, "description": description,
+                            "source": source, "source_path": source_path,
+                        })),
+                    )
+                    .await?,
+                );
             }
             PlanAction::View { id } => output(&client::get(&c, &format!("/plans/{id}")).await?),
             PlanAction::List { project_id, status } => {
                 let qs = query_string(&[("project_id", &project_id), ("status", &status)]);
                 output(&client::get(&c, &format!("/plans{qs}")).await?);
             }
-            PlanAction::Update { id, title, description, status } => {
+            PlanAction::Update {
+                id,
+                title,
+                description,
+                status,
+            } => {
                 let mut body = json!({});
-                if let Some(v) = title { body["title"] = json!(v); }
-                if let Some(v) = description { body["description"] = json!(v); }
-                if let Some(v) = status { body["status"] = json!(v); }
+                if let Some(v) = title {
+                    body["title"] = json!(v);
+                }
+                if let Some(v) = description {
+                    body["description"] = json!(v);
+                }
+                if let Some(v) = status {
+                    body["status"] = json!(v);
+                }
                 output(&client::request(&c, "PATCH", &format!("/plans/{id}"), Some(body)).await?);
             }
             PlanAction::Delete { id } => {
@@ -1074,9 +1218,23 @@ async fn main() -> Result<()> {
                 output(&client::request(&c, "POST", &format!("/plans/{id}/approve"), None).await?);
             }
             PlanAction::Complete { id } => {
-                output(&client::request(&c, "PATCH", &format!("/plans/{id}"), Some(json!({"status": "completed"}))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "PATCH",
+                        &format!("/plans/{id}"),
+                        Some(json!({"status": "completed"})),
+                    )
+                    .await?,
+                );
             }
-            PlanAction::Import { file, project, cwd, source, dry_run } => {
+            PlanAction::Import {
+                file,
+                project,
+                cwd,
+                source,
+                dry_run,
+            } => {
                 output(&client::request(&c, "POST", "/plans/import", Some(json!({
                     "file": file, "project": project, "cwd": cwd, "source": source, "dryRun": dry_run,
                 }))).await?);
@@ -1085,34 +1243,61 @@ async fn main() -> Result<()> {
 
         // ===== Unit =====
         Command::Unit { action } => match action {
-            UnitAction::Create { title, plan, goal, idx, mode } => {
+            UnitAction::Create {
+                title,
+                plan,
+                goal,
+                idx,
+                mode,
+            } => {
                 if mode != "sequential" && mode != "parallel" {
                     eprintln!("Error: invalid value '{}' for '--mode'\n", mode);
                     eprintln!("  Valid values: sequential, parallel\n");
                     eprintln!("  sequential  Tasks execute one at a time (default)");
-                    eprintln!("  parallel    Tasks can be executed by multiple agents simultaneously");
+                    eprintln!(
+                        "  parallel    Tasks can be executed by multiple agents simultaneously"
+                    );
                     std::process::exit(1);
                 }
-                output(&client::request(&c, "POST", "/units", Some(json!({
-                    "plan_id": plan, "title": title, "goal": goal, "idx": idx,
-                    "execution_mode": mode,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/units",
+                        Some(json!({
+                            "plan_id": plan, "title": title, "goal": goal, "idx": idx,
+                            "execution_mode": mode,
+                        })),
+                    )
+                    .await?,
+                );
             }
             UnitAction::View { id } => output(&client::get(&c, &format!("/units/{id}")).await?),
             UnitAction::List { plan_id } => {
                 let qs = query_string(&[("plan_id", &plan_id)]);
                 output(&client::get(&c, &format!("/units{qs}")).await?);
             }
-            UnitAction::Update { id, title, goal, mode } => {
+            UnitAction::Update {
+                id,
+                title,
+                goal,
+                mode,
+            } => {
                 let mut body = json!({});
-                if let Some(v) = title { body["title"] = json!(v); }
-                if let Some(v) = goal { body["goal"] = json!(v); }
+                if let Some(v) = title {
+                    body["title"] = json!(v);
+                }
+                if let Some(v) = goal {
+                    body["goal"] = json!(v);
+                }
                 if let Some(ref v) = mode {
                     if v != "sequential" && v != "parallel" {
                         eprintln!("Error: invalid value '{}' for '--mode'\n", v);
                         eprintln!("  Valid values: sequential, parallel\n");
                         eprintln!("  sequential  Tasks execute one at a time");
-                        eprintln!("  parallel    Tasks can be executed by multiple agents simultaneously");
+                        eprintln!(
+                            "  parallel    Tasks can be executed by multiple agents simultaneously"
+                        );
                         std::process::exit(1);
                     }
                     body["execution_mode"] = json!(v);
@@ -1126,31 +1311,65 @@ async fn main() -> Result<()> {
 
         // ===== Cycle =====
         Command::Cycle { action } => match action {
-            CycleAction::Create { title, project, goal, idx } => {
-                output(&client::request(&c, "POST", "/cycles", Some(json!({
-                    "project_id": project, "title": title, "goal": goal, "idx": idx,
-                }))).await?);
+            CycleAction::Create {
+                title,
+                project,
+                goal,
+                idx,
+            } => {
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/cycles",
+                        Some(json!({
+                            "project_id": project, "title": title, "goal": goal, "idx": idx,
+                        })),
+                    )
+                    .await?,
+                );
             }
             CycleAction::View { id } => output(&client::get(&c, &format!("/cycles/{id}")).await?),
             CycleAction::List { project_id, status } => {
                 let qs = query_string(&[("project_id", &project_id), ("status", &status)]);
                 output(&client::get(&c, &format!("/cycles{qs}")).await?);
             }
-            CycleAction::Update { id, title, goal, status } => {
+            CycleAction::Update {
+                id,
+                title,
+                goal,
+                status,
+            } => {
                 let mut body = json!({});
-                if let Some(v) = title { body["title"] = json!(v); }
-                if let Some(v) = goal { body["goal"] = json!(v); }
-                if let Some(v) = status { body["status"] = json!(v); }
+                if let Some(v) = title {
+                    body["title"] = json!(v);
+                }
+                if let Some(v) = goal {
+                    body["goal"] = json!(v);
+                }
+                if let Some(v) = status {
+                    body["status"] = json!(v);
+                }
                 output(&client::request(&c, "PATCH", &format!("/cycles/{id}"), Some(body)).await?);
             }
             CycleAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/cycles/{id}"), None).await?);
             }
             CycleAction::Activate { id } => {
-                output(&client::request(&c, "POST", &format!("/cycles/{id}/activate"), None).await?);
+                output(
+                    &client::request(&c, "POST", &format!("/cycles/{id}/activate"), None).await?,
+                );
             }
             CycleAction::Complete { id } => {
-                output(&client::request(&c, "PATCH", &format!("/cycles/{id}"), Some(json!({"status": "completed"}))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "PATCH",
+                        &format!("/cycles/{id}"),
+                        Some(json!({"status": "completed"})),
+                    )
+                    .await?,
+                );
             }
             CycleAction::Tasks { id } => {
                 output(&client::get(&c, &format!("/cycles/{id}/tasks")).await?);
@@ -1163,47 +1382,133 @@ async fn main() -> Result<()> {
 
         // ===== Task =====
         Command::Task { action } => match action {
-            TaskAction::Create { title, unit, body, assignee, idx, depends_on, parent_task, priority, complexity, estimated_edits, cycle, r#type } => {
-                let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
+            TaskAction::Create {
+                title,
+                unit,
+                body,
+                assignee,
+                idx,
+                depends_on,
+                parent_task,
+                priority,
+                complexity,
+                estimated_edits,
+                cycle,
+                r#type,
+            } => {
+                let cwd = std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string());
                 let type_val = r#type;
-                output(&client::request(&c, "POST", "/tasks", Some(json!({
-                    "unit_id": unit, "title": title, "body": body.unwrap_or_default(),
-                    "assignee": assignee, "idx": idx, "depends_on": depends_on,
-                    "parent_task_id": parent_task, "priority": priority,
-                    "complexity": complexity, "estimated_edits": estimated_edits,
-                    "cycle_id": cycle, "cwd": cwd, "type": type_val,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/tasks",
+                        Some(json!({
+                            "unit_id": unit, "title": title, "body": body.unwrap_or_default(),
+                            "assignee": assignee, "idx": idx, "depends_on": depends_on,
+                            "parent_task_id": parent_task, "priority": priority,
+                            "complexity": complexity, "estimated_edits": estimated_edits,
+                            "cycle_id": cycle, "cwd": cwd, "type": type_val,
+                        })),
+                    )
+                    .await?,
+                );
             }
             TaskAction::View { id } => output(&client::get(&c, &format!("/tasks/{id}")).await?),
-            TaskAction::List { unit_id, plan_id, status, agent_id } => {
-                let qs = query_string(&[("unit_id", &unit_id), ("plan_id", &plan_id), ("status", &status), ("agent_id", &agent_id)]);
+            TaskAction::List {
+                unit_id,
+                plan_id,
+                status,
+                agent_id,
+            } => {
+                let qs = query_string(&[
+                    ("unit_id", &unit_id),
+                    ("plan_id", &plan_id),
+                    ("status", &status),
+                    ("agent_id", &agent_id),
+                ]);
                 output(&client::get(&c, &format!("/tasks{qs}")).await?);
             }
-            TaskAction::Update { id, title, body: task_body, status, assignee, session_id, agent, priority, complexity, estimated_edits, parent_task, cycle, agent_id, comment } => {
+            TaskAction::Update {
+                id,
+                title,
+                body: task_body,
+                status,
+                assignee,
+                session_id,
+                agent,
+                priority,
+                complexity,
+                estimated_edits,
+                parent_task,
+                cycle,
+                agent_id,
+                comment,
+            } => {
                 let mut payload = json!({});
-                if let Some(v) = title { payload["title"] = json!(v); }
-                if let Some(v) = task_body { payload["body"] = json!(v); }
-                if let Some(v) = status { payload["status"] = json!(v); }
-                if let Some(ref v) = assignee { payload["assignee"] = json!(v); }
-                if let Some(v) = session_id { payload["_session_id"] = json!(v); }
+                if let Some(v) = title {
+                    payload["title"] = json!(v);
+                }
+                if let Some(v) = task_body {
+                    payload["body"] = json!(v);
+                }
+                if let Some(v) = status {
+                    payload["status"] = json!(v);
+                }
+                if let Some(ref v) = assignee {
+                    payload["assignee"] = json!(v);
+                }
+                if let Some(v) = session_id {
+                    payload["_session_id"] = json!(v);
+                }
                 payload["_agent"] = json!(agent);
-                if let Some(v) = priority { payload["priority"] = json!(v); }
-                if let Some(v) = complexity { payload["complexity"] = json!(v); }
-                if let Some(v) = estimated_edits { payload["estimated_edits"] = json!(v); }
-                if let Some(v) = parent_task { payload["parent_task_id"] = json!(v); }
-                if let Some(v) = cycle { payload["cycle_id"] = json!(v); }
-                if let Some(v) = agent_id { payload["agent_id"] = json!(v); }
-                output(&client::request(&c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?);
+                if let Some(v) = priority {
+                    payload["priority"] = json!(v);
+                }
+                if let Some(v) = complexity {
+                    payload["complexity"] = json!(v);
+                }
+                if let Some(v) = estimated_edits {
+                    payload["estimated_edits"] = json!(v);
+                }
+                if let Some(v) = parent_task {
+                    payload["parent_task_id"] = json!(v);
+                }
+                if let Some(v) = cycle {
+                    payload["cycle_id"] = json!(v);
+                }
+                if let Some(v) = agent_id {
+                    payload["agent_id"] = json!(v);
+                }
+                output(
+                    &client::request(&c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?,
+                );
                 if let Some(text) = comment {
                     let author = assignee.as_deref().unwrap_or(&agent);
-                    client::request(&c, "POST", &format!("/tasks/{id}/comments"), Some(json!({"task_id": id, "author": author, "body": text}))).await?;
+                    client::request(
+                        &c,
+                        "POST",
+                        &format!("/tasks/{id}/comments"),
+                        Some(json!({"task_id": id, "author": author, "body": text})),
+                    )
+                    .await?;
                 }
             }
             TaskAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/tasks/{id}"), None).await?);
             }
             TaskAction::AppendBody { id, text } => {
-                output(&client::request(&c, "POST", &format!("/tasks/{id}/body"), Some(json!({"text": text}))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        &format!("/tasks/{id}/body"),
+                        Some(json!({"text": text})),
+                    )
+                    .await?,
+                );
             }
             TaskAction::Search { query, limit } => {
                 let qs = format!("?q={}&limit={limit}", urlenc(&query));
@@ -1213,54 +1518,125 @@ async fn main() -> Result<()> {
 
         // ===== Artifact =====
         Command::Artifact { action } => match action {
-            ArtifactAction::Create { title, r#type, task, unit, plan, content, content_format, parent } => {
+            ArtifactAction::Create {
+                title,
+                r#type,
+                task,
+                unit,
+                plan,
+                content,
+                content_format,
+                parent,
+            } => {
                 output(&client::request(&c, "POST", "/artifacts", Some(json!({
                     "type": r#type, "title": title, "task_id": task, "unit_id": unit,
                     "plan_id": plan, "content": content.unwrap_or_default(), "content_format": content_format,
                     "parent_id": parent,
                 }))).await?);
             }
-            ArtifactAction::View { id } => output(&client::get(&c, &format!("/artifacts/{id}")).await?),
-            ArtifactAction::List { task_id, unit_id, plan_id, r#type } => {
+            ArtifactAction::View { id } => {
+                output(&client::get(&c, &format!("/artifacts/{id}")).await?)
+            }
+            ArtifactAction::List {
+                task_id,
+                unit_id,
+                plan_id,
+                r#type,
+            } => {
                 let type_opt = r#type;
                 let qs = query_string(&[
-                    ("task_id", &task_id), ("unit_id", &unit_id), ("plan_id", &plan_id), ("type", &type_opt)
+                    ("task_id", &task_id),
+                    ("unit_id", &unit_id),
+                    ("plan_id", &plan_id),
+                    ("type", &type_opt),
                 ]);
                 output(&client::get(&c, &format!("/artifacts{qs}")).await?);
             }
             ArtifactAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/artifacts/{id}"), None).await?);
             }
-            ArtifactAction::Search { query, mode, scope, limit } => {
-                let qs = format!("?q={}&mode={}&scope={}&limit={}", urlenc(&query), mode, scope, limit);
+            ArtifactAction::Search {
+                query,
+                mode,
+                scope,
+                limit,
+            } => {
+                let qs = format!(
+                    "?q={}&mode={}&scope={}&limit={}",
+                    urlenc(&query),
+                    mode,
+                    scope,
+                    limit
+                );
                 output(&client::get(&c, &format!("/artifacts/search{qs}")).await?);
             }
-            ArtifactAction::Import { cwd, plan_id, unit_id, scope, dry_run } => {
+            ArtifactAction::Import {
+                cwd,
+                plan_id,
+                unit_id,
+                scope,
+                dry_run,
+            } => {
                 output(&client::request(&c, "POST", "/artifacts/import", Some(json!({
                     "cwd": cwd, "plan_id": plan_id, "unit_id": unit_id, "scope": scope, "dry_run": dry_run,
                 }))).await?);
             }
-            ArtifactAction::Export { cwd, plan_id, unit_id } => {
-                output(&client::request(&c, "POST", "/artifacts/export", Some(json!({
-                    "cwd": cwd, "plan_id": plan_id, "unit_id": unit_id,
-                }))).await?);
+            ArtifactAction::Export {
+                cwd,
+                plan_id,
+                unit_id,
+            } => {
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/artifacts/export",
+                        Some(json!({
+                            "cwd": cwd, "plan_id": plan_id, "unit_id": unit_id,
+                        })),
+                    )
+                    .await?,
+                );
             }
         },
 
         // ===== Run =====
         Command::Run { action } => match action {
-            RunAction::Start { task, session_id, agent } => {
-                output(&client::request(&c, "POST", "/runs", Some(json!({
-                    "task_id": task, "session_id": session_id, "agent": agent,
-                }))).await?);
+            RunAction::Start {
+                task,
+                session_id,
+                agent,
+            } => {
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/runs",
+                        Some(json!({
+                            "task_id": task, "session_id": session_id, "agent": agent,
+                        })),
+                    )
+                    .await?,
+                );
             }
             RunAction::Finish { id, result, notes } => {
-                output(&client::request(&c, "POST", &format!("/runs/{id}/finish"), Some(json!({
-                    "result": result, "notes": notes,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        &format!("/runs/{id}/finish"),
+                        Some(json!({
+                            "result": result, "notes": notes,
+                        })),
+                    )
+                    .await?,
+                );
             }
             RunAction::View { id } => output(&client::get(&c, &format!("/runs/{id}")).await?),
-            RunAction::List { task_id, session_id } => {
+            RunAction::List {
+                task_id,
+                session_id,
+            } => {
                 let qs = query_string(&[("task_id", &task_id), ("session_id", &session_id)]);
                 output(&client::get(&c, &format!("/runs{qs}")).await?);
             }
@@ -1269,9 +1645,17 @@ async fn main() -> Result<()> {
         // ===== Comment =====
         Command::Comment { action } => match action {
             CommentAction::Create { task, body, author } => {
-                output(&client::request(&c, "POST", &format!("/tasks/{task}/comments"), Some(json!({
-                    "author": author, "body": body,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        &format!("/tasks/{task}/comments"),
+                        Some(json!({
+                            "author": author, "body": body,
+                        })),
+                    )
+                    .await?,
+                );
             }
             CommentAction::List { task_id } => {
                 output(&client::get(&c, &format!("/tasks/{task_id}/comments")).await?);
@@ -1283,22 +1667,56 @@ async fn main() -> Result<()> {
 
         // ===== Question =====
         Command::Question { action } => match action {
-            QuestionAction::Create { body, plan, unit, task, kind, origin, asked_by } => {
-                output(&client::request(&c, "POST", "/questions", Some(json!({
-                    "plan_id": plan, "unit_id": unit, "task_id": task,
-                    "kind": kind, "origin": origin, "body": body, "asked_by": asked_by,
-                }))).await?);
+            QuestionAction::Create {
+                body,
+                plan,
+                unit,
+                task,
+                kind,
+                origin,
+                asked_by,
+            } => {
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/questions",
+                        Some(json!({
+                            "plan_id": plan, "unit_id": unit, "task_id": task,
+                            "kind": kind, "origin": origin, "body": body, "asked_by": asked_by,
+                        })),
+                    )
+                    .await?,
+                );
             }
             QuestionAction::Answer { id, text, by } => {
-                output(&client::request(&c, "POST", &format!("/questions/{id}/answer"), Some(json!({
-                    "answer": text, "answered_by": by,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        &format!("/questions/{id}/answer"),
+                        Some(json!({
+                            "answer": text, "answered_by": by,
+                        })),
+                    )
+                    .await?,
+                );
             }
-            QuestionAction::View { id } => output(&client::get(&c, &format!("/questions/{id}")).await?),
-            QuestionAction::List { plan_id, unit_id, task_id, pending } => {
+            QuestionAction::View { id } => {
+                output(&client::get(&c, &format!("/questions/{id}")).await?)
+            }
+            QuestionAction::List {
+                plan_id,
+                unit_id,
+                task_id,
+                pending,
+            } => {
                 let pending_str = pending.map(|b| b.to_string());
                 let qs = query_string(&[
-                    ("plan_id", &plan_id), ("unit_id", &unit_id), ("task_id", &task_id), ("pending", &pending_str)
+                    ("plan_id", &plan_id),
+                    ("unit_id", &unit_id),
+                    ("task_id", &task_id),
+                    ("pending", &pending_str),
                 ]);
                 output(&client::get(&c, &format!("/questions{qs}")).await?);
             }

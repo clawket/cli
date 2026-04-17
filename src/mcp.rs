@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -10,10 +10,12 @@ pub fn run() -> Result<()> {
     let status = Command::new("node")
         .arg(&script)
         .status()
-        .with_context(|| format!(
-            "Failed to spawn node for MCP server at {}. Is Node.js installed and on PATH?",
-            script.display()
-        ))?;
+        .with_context(|| {
+            format!(
+                "Failed to spawn node for MCP server at {}. Is Node.js installed and on PATH?",
+                script.display()
+            )
+        })?;
     std::process::exit(status.code().unwrap_or(1));
 }
 

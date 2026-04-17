@@ -1,6 +1,6 @@
+use anyhow::{Result, bail};
 use std::fs;
 use std::process::Command;
-use anyhow::{Result, bail};
 
 use crate::DaemonAction;
 use crate::paths;
@@ -17,10 +17,17 @@ fn clawketd_cmd() -> (String, Vec<String>) {
     // 2. Auto-discover: CLI binary location → ../daemon/bin/clawketd.js
     if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
-            let clawketd_js = bin_dir.join("..").join("daemon").join("bin").join("clawketd.js");
+            let clawketd_js = bin_dir
+                .join("..")
+                .join("daemon")
+                .join("bin")
+                .join("clawketd.js");
             if clawketd_js.exists() {
                 let canonical = clawketd_js.canonicalize().unwrap_or(clawketd_js);
-                return ("node".to_string(), vec![canonical.to_string_lossy().to_string()]);
+                return (
+                    "node".to_string(),
+                    vec![canonical.to_string_lossy().to_string()],
+                );
             }
         }
     }
@@ -62,15 +69,21 @@ fn run_clawketd(subcmd: &str) -> Result<std::process::Output> {
         .output();
     match output {
         Ok(out) => Ok(out),
-        Err(e) => bail!("failed to run '{program}': {e}\nMake sure clawketd is in your PATH or set CLAWKET_DAEMON_BIN"),
+        Err(e) => bail!(
+            "failed to run '{program}': {e}\nMake sure clawketd is in your PATH or set CLAWKET_DAEMON_BIN"
+        ),
     }
 }
 
 fn print_output(out: &std::process::Output) {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if !stdout.is_empty() { print!("{stdout}"); }
-    if !stderr.is_empty() { eprint!("{stderr}"); }
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
 }
 
 fn cmd_start() -> Result<()> {

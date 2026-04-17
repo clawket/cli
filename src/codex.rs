@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
-use crate::{client, daemon, paths};
 use crate::DaemonAction;
+use crate::{client, daemon, paths};
 
 fn codex_bin() -> String {
     std::env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string())
@@ -26,7 +26,10 @@ fn prompt_file() -> PathBuf {
 }
 
 fn session_id() -> String {
-    let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     format!("codex-{millis}-{}", std::process::id())
 }
 
@@ -136,7 +139,12 @@ fn upsert_section(lines: &mut Vec<String>, header: &str, kv_lines: &[String]) {
         return;
     }
 
-    if !lines.is_empty() && !lines.last().map(|line| line.trim().is_empty()).unwrap_or(false) {
+    if !lines.is_empty()
+        && !lines
+            .last()
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false)
+    {
         lines.push(String::new());
     }
     lines.push(header.to_string());
@@ -149,7 +157,11 @@ fn remove_section(lines: &mut Vec<String>, header: &str) {
             end += 1;
         }
         lines.drain(start..end);
-        while lines.first().map(|line| line.trim().is_empty()).unwrap_or(false) {
+        while lines
+            .first()
+            .map(|line| line.trim().is_empty())
+            .unwrap_or(false)
+        {
             lines.remove(0);
         }
     }
@@ -231,20 +243,33 @@ fn installation_state() -> serde_json::Value {
 }
 
 pub fn install() -> Result<serde_json::Value> {
-    let root = paths::project_root().ok_or_else(|| anyhow::anyhow!("failed to locate Clawket project root"))?;
+    let root = paths::project_root()
+        .ok_or_else(|| anyhow::anyhow!("failed to locate Clawket project root"))?;
     let root_str = root.to_string_lossy().to_string();
     let mut lines = read_user_config_lines()?;
 
-    upsert_section(&mut lines, "[features]", &[
-        String::from("plugins = true"),
-        String::from("codex_hooks = true"),
-    ]);
-    upsert_section(&mut lines, &format!("[marketplaces.{MARKETPLACE_NAME}]"), &[
-        format!("last_updated = \"{}\"", iso8601_now_utc()),
-        String::from("source_type = \"local\""),
-        format!("source = \"{root_str}\""),
-    ]);
-    upsert_section(&mut lines, &format!("[plugins.\"{PLUGIN_KEY}\"]"), &[String::from("enabled = true")]);
+    upsert_section(
+        &mut lines,
+        "[features]",
+        &[
+            String::from("plugins = true"),
+            String::from("codex_hooks = true"),
+        ],
+    );
+    upsert_section(
+        &mut lines,
+        &format!("[marketplaces.{MARKETPLACE_NAME}]"),
+        &[
+            format!("last_updated = \"{}\"", iso8601_now_utc()),
+            String::from("source_type = \"local\""),
+            format!("source = \"{root_str}\""),
+        ],
+    );
+    upsert_section(
+        &mut lines,
+        &format!("[plugins.\"{PLUGIN_KEY}\"]"),
+        &[String::from("enabled = true")],
+    );
 
     write_user_config_lines(&lines)?;
     let cache_root = install_plugin_cache(&root)?;
@@ -283,7 +308,11 @@ pub fn uninstall() -> Result<serde_json::Value> {
 async fn query_dashboard(c: &client::HttpClient, cwd: &str) -> Result<String> {
     let qs = format!("?cwd={}&show=active", urlencoding(cwd));
     let val = client::get(c, &format!("/dashboard{qs}")).await?;
-    Ok(val.get("context").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    Ok(val
+        .get("context")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
 }
 
 fn urlencoding(value: &str) -> String {
@@ -321,10 +350,16 @@ async fn finish_open_runs(c: &client::HttpClient, session_id: &str) -> Result<()
     for run in arr {
         if run.get("ended_at").and_then(|v| v.as_i64()).is_none() {
             if let Some(id) = run.get("id").and_then(|v| v.as_str()) {
-                client::request(c, "POST", &format!("/runs/{id}/finish"), Some(json!({
-                    "result": "session_ended",
-                    "notes": "Auto-closed by Codex wrapper"
-                }))).await?;
+                client::request(
+                    c,
+                    "POST",
+                    &format!("/runs/{id}/finish"),
+                    Some(json!({
+                        "result": "session_ended",
+                        "notes": "Auto-closed by Codex wrapper"
+                    })),
+                )
+                .await?;
             }
         }
     }
@@ -349,31 +384,40 @@ pub async fn launch() -> Result<()> {
     let task = current_active_task(&c).await?;
     if let Some(task) = task.as_ref() {
         if let Some(task_id) = task.get("id").and_then(|v| v.as_str()) {
-            client::request(&c, "POST", "/runs", Some(json!({
-                "task_id": task_id,
-                "session_id": session_id,
-                "agent": "main"
-            }))).await?;
+            client::request(
+                &c,
+                "POST",
+                "/runs",
+                Some(json!({
+                    "task_id": task_id,
+                    "session_id": session_id,
+                    "agent": "main"
+                })),
+            )
+            .await?;
         }
     }
 
     fs::write(prompt_file(), &prompt)?;
-    fs::write(session_file(), serde_json::to_string_pretty(&json!({
-        "runtime": "codex",
-        "session_id": session_id,
-        "cwd": cwd,
-        "active_task_id": task.as_ref().and_then(|t| t.get("id")).and_then(|v| v.as_str()),
-        "managed": true,
-        "capabilities": {
-            "session_start_context": true,
-            "per_turn_context": false,
-            "hard_pre_mutation_block": false,
-            "activity_stream_capture": false,
-            "subagent_lifecycle_hook": false,
-            "plan_mode_bridge": false,
-            "session_stop_hook": true
-        }
-    }))?)?;
+    fs::write(
+        session_file(),
+        serde_json::to_string_pretty(&json!({
+            "runtime": "codex",
+            "session_id": session_id,
+            "cwd": cwd,
+            "active_task_id": task.as_ref().and_then(|t| t.get("id")).and_then(|v| v.as_str()),
+            "managed": true,
+            "capabilities": {
+                "session_start_context": true,
+                "per_turn_context": false,
+                "hard_pre_mutation_block": false,
+                "activity_stream_capture": false,
+                "subagent_lifecycle_hook": false,
+                "plan_mode_bridge": false,
+                "session_stop_hook": true
+            }
+        }))?,
+    )?;
 
     eprintln!("[clawket] launching Codex with Clawket bootstrap context");
     eprintln!("[clawket] session: {session_id}");
@@ -421,10 +465,12 @@ pub fn doctor() -> serde_json::Value {
         .arg("--version")
         .output()
         .ok()
-        .and_then(|out| if out.status.success() {
-            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-        } else {
-            None
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
         });
 
     json!({
@@ -448,11 +494,18 @@ pub fn doctor() -> serde_json::Value {
 
 pub async fn stop() -> Result<serde_json::Value> {
     let status = status()?;
-    if !status.get("active").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if !status
+        .get("active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         return Ok(status);
     }
     let session = status.get("session").cloned().unwrap_or_else(|| json!({}));
-    let session_id = session.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = session
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if !session_id.is_empty() {
         let c = client::make_client();
         finish_open_runs(&c, session_id).await?;
