@@ -1,70 +1,225 @@
 name: Release
 
+# Clawket Rust package release template (daemon, cli).
+# Trigger: push to main → conventional-commit 기반 자동 버전업 → cross-platform
+# build → GitHub Release → clawket/clawket 레포에 components.json 업데이트 PR.
+#
+# Required org-level secret (clawket org 전체 공유):
+#   - CLAWKET_RELEASE_PAT : fine-grained PAT, clawket org 모든 레포에
+#     `contents: write` + `pull_requests: write` 권한
+#
+# Assumptions:
+#   - Cargo.toml lives at the repo root.
+#   - Single [[bin]] or [package] whose name matches the asset prefix.
+#   - Tag format: v${version}
+#   - Plugin manifest key is the repo name (e.g. `daemon`, `cli`).
+
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Override version bump (patch/minor/major)'
+        required: false
+        type: choice
+        options: ['', patch, minor, major]
+        default: ''
 
-permissions:
-  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  bump:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      should_release: ${{ steps.bump.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CLAWKET_RELEASE_PAT }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Determine next version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "")
+          RANGE="${LAST_TAG:+${LAST_TAG}..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+
+          if [ -n "$LAST_TAG" ] && [ -z "$(git log ${LAST_TAG}..HEAD --oneline)" ]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "No new commits since $LAST_TAG"
+            exit 0
+          fi
+
+          # Conventional Commits → SemVer policy.
+          # Only feat/fix/perf and breaking changes trigger a release.
+          # ci/docs/chore/refactor/test/style/build commits do not release.
+          BUMP="${{ inputs.bump }}"
+          if [ -z "$BUMP" ]; then
+            if git log $RANGE --format='%B' | grep -qE '^BREAKING CHANGE:' \
+               || git log $RANGE --format='%s' | grep -qE '^[a-z]+(\(.+\))?!:'; then
+              BUMP=major
+            elif git log $RANGE --format='%s' | grep -qE '^feat(\(.+\))?:'; then
+              BUMP=minor
+            elif git log $RANGE --format='%s' | grep -qE '^(fix|perf)(\(.+\))?:'; then
+              BUMP=patch
+            else
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              echo "No release-worthy commits since ${LAST_TAG:-<init>}"
+              exit 0
+            fi
+          fi
+          echo "Selected bump: $BUMP"
+
+          cargo set-version --bump "$BUMP"
+          VERSION=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import sys, json; print(json.load(sys.stdin)["packages"][0]["version"])')
+
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release $TAG [skip ci]"
+          git tag "$TAG" -m "Release $TAG"
+          # Atomic push: main and tag succeed together, or neither.
+          git push --atomic origin HEAD:main "$TAG"
+
   build:
+    needs: bump
+    if: needs.bump.outputs.should_release == 'true'
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-apple-darwin
-            os: macos-14
-            archive: tar.gz
-          - target: aarch64-apple-darwin
-            os: macos-14
-            archive: tar.gz
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            archive: tar.gz
             cross: true
-          # Windows target tracked as known-unsupported — CLI uses UnixStream + libc::kill.
-          # Port to std::os::windows::net::* and Win32 kill before re-enabling.
-    runs-on: ${{ matrix.os }}
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-      - name: Install cross toolchain
-        if: matrix.cross
+      - name: Install cross toolchain (Linux aarch64)
+        if: matrix.cross == true
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Configure cross linker
+        if: matrix.cross == true
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          mkdir -p .cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
-      - run: cargo build --release --target ${{ matrix.target }}
+          mkdir -p ~/.cargo
+          printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' >> ~/.cargo/config.toml
+      - name: Detect binary name
+        id: detect
+        shell: bash
+        run: |
+          BIN=$(awk '/^\[\[bin\]\]/{flag=1; next} flag && /^name = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          if [ -z "$BIN" ]; then
+            BIN=$(awk '/^\[package\]/{flag=1} flag && /^name = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          fi
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+      - name: Build release
+        env:
+          CARGO_TERM_COLOR: always
+        run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          NAME="clawket-${VERSION}-${{ matrix.target }}"
+          BIN="${{ steps.detect.outputs.bin }}"
+          TAG="${{ needs.bump.outputs.tag }}"
+          TARGET="${{ matrix.target }}"
+          NAME="${BIN}-${TAG}-${TARGET}"
           mkdir -p "dist/$NAME"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/${{ matrix.target }}/release/clawket.exe "dist/$NAME/"
-            cp README.md LICENSE "dist/$NAME/"
-            (cd dist && 7z a "$NAME.zip" "$NAME")
-          else
-            cp target/${{ matrix.target }}/release/clawket "dist/$NAME/"
-            cp README.md LICENSE "dist/$NAME/"
-            (cd dist && tar -czvf "$NAME.tar.gz" "$NAME")
-          fi
+          cp "target/${TARGET}/release/${BIN}" "dist/$NAME/"
+          cp LICENSE "dist/$NAME/" 2>/dev/null || true
+          tar -C dist -czvf "${NAME}.tar.gz" "$NAME"
+          shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.tar.gz.sha256
+
+  publish:
+    needs: [bump, build]
+    if: needs.bump.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          pattern: dist-*
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.bump.outputs.tag }}
           files: |
-            dist/*.tar.gz
-            dist/*.zip
+            artifacts/*.tar.gz
+            artifacts/*.tar.gz.sha256
           generate_release_notes: true
+
+  bump-manifest:
+    needs: [bump, publish]
+    if: needs.bump.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update components.json in clawket/clawket
+        env:
+          GH_TOKEN: ${{ secrets.CLAWKET_RELEASE_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          TAG="${{ needs.bump.outputs.tag }}"
+          BRANCH="bump/${REPO_NAME}-${TAG}"
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/clawket/clawket.git" plugin
+          cd plugin
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+
+          jq --arg key "$REPO_NAME" --arg ver "$TAG" \
+            '.[$key] = $ver' components.json > components.json.tmp
+          mv components.json.tmp components.json
+
+          git add components.json
+          git commit -m "chore: bump ${REPO_NAME} to ${TAG}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: bump ${REPO_NAME} to ${TAG}" \
+            --body "Auto-generated from ${GITHUB_REPOSITORY} release ${TAG}."
