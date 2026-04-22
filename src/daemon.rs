@@ -1,39 +1,60 @@
 use anyhow::{Result, bail};
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::DaemonAction;
 use crate::paths;
 
 /// Returns (program, extra_args) for running clawketd.
-/// Priority: CLAWKET_DAEMON_BIN env > sibling daemon/bin/clawketd.js > PATH "clawketd"
+/// Search order:
+///   1. CLAWKET_DAEMON_BIN env (explicit override)
+///   2. <cli-exe>/../daemon/bin/clawketd (plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd)
+///   3. <cli-exe>/clawketd (sibling layout: both binaries in same dir, e.g. ~/.cargo/bin/)
+///   4. $XDG_DATA_HOME/clawket/bin/clawketd (user install)
+///   5. PATH "clawketd"
 fn clawketd_cmd() -> (String, Vec<String>) {
     // 1. Explicit env var
     if let Ok(bin) = std::env::var("CLAWKET_DAEMON_BIN") {
         let parts: Vec<String> = bin.split_whitespace().map(String::from).collect();
-        return (parts[0].clone(), parts[1..].to_vec());
-    }
-
-    // 2. Auto-discover: CLI binary location → ../daemon/bin/clawketd.js
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let clawketd_js = bin_dir
-                .join("..")
-                .join("daemon")
-                .join("bin")
-                .join("clawketd.js");
-            if clawketd_js.exists() {
-                let canonical = clawketd_js.canonicalize().unwrap_or(clawketd_js);
-                return (
-                    "node".to_string(),
-                    vec![canonical.to_string_lossy().to_string()],
-                );
-            }
+        if !parts.is_empty() {
+            return (parts[0].clone(), parts[1..].to_vec());
         }
     }
 
-    // 3. Fallback: PATH
+    for candidate in search_candidates() {
+        if candidate.exists() {
+            let canonical = candidate.canonicalize().unwrap_or(candidate);
+            return (canonical.to_string_lossy().into_owned(), vec![]);
+        }
+    }
+
+    // Final fallback: PATH
     ("clawketd".to_string(), vec![])
+}
+
+fn search_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            // 2. Plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd
+            out.push(bin_dir.join("..").join("daemon").join("bin").join("clawketd"));
+            // 3. Sibling layout
+            out.push(bin_dir.join("clawketd"));
+        }
+    }
+
+    // 4. XDG_DATA_HOME/clawket/bin/clawketd
+    let data_home = std::env::var("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/share")));
+    if let Some(base) = data_home {
+        out.push(base.join("clawket").join("bin").join("clawketd"));
+    }
+
+    out
 }
 
 fn read_pid() -> Option<u32> {

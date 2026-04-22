@@ -1,6 +1,8 @@
 mod client;
 mod daemon;
+mod doctor;
 mod mcp;
+mod migrate;
 mod paths;
 
 use anyhow::Result;
@@ -45,6 +47,20 @@ enum Command {
     /// Exposes read-only RAG tools: search_artifacts, search_tasks, find_similar_tasks,
     /// get_task_context, get_recent_decisions. Requires clawketd running.
     Mcp,
+    /// Diagnose Clawket installation (daemon, binaries, paths, connectivity).
+    Doctor,
+    /// Migrate legacy lattice data to clawket XDG paths.
+    Migrate {
+        /// Show what would be migrated without copying
+        #[arg(long)]
+        dry_run: bool,
+        /// Legacy data directory to migrate from (default: $XDG_DATA_HOME/lattice)
+        #[arg(long)]
+        from: Option<String>,
+        /// Overwrite existing clawket DB
+        #[arg(long)]
+        force: bool,
+    },
     /// Manage projects
     #[command(alias = "proj")]
     Project {
@@ -967,6 +983,12 @@ async fn main() -> Result<()> {
         Command::Mcp => {
             return mcp::run();
         }
+        Command::Doctor => {
+            return doctor::run().await;
+        }
+        Command::Migrate { dry_run, from, force } => {
+            return migrate::run(dry_run, from, force);
+        }
         _ => {}
     }
 
@@ -991,6 +1013,8 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Daemon { .. } => unreachable!(),
         Command::Mcp => unreachable!(),
+        Command::Doctor => unreachable!(),
+        Command::Migrate { .. } => unreachable!(),
 
         Command::Dashboard { cwd, show } => {
             let cwd = cwd.unwrap_or_else(|| {
