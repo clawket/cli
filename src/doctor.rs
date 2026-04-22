@@ -55,7 +55,10 @@ pub async fn run() -> Result<()> {
     match client::get(&client, "/health").await {
         Ok(val) => {
             println!("  Unix socket /health → OK");
-            println!("  {}", serde_json::to_string_pretty(&val).unwrap_or_default());
+            println!(
+                "  {}",
+                serde_json::to_string_pretty(&val).unwrap_or_default()
+            );
         }
         Err(e) => {
             println!("  Unix socket /health → FAIL: {e}");
@@ -67,7 +70,10 @@ pub async fn run() -> Result<()> {
     section("Legacy lattice data");
     let legacy = legacy_data_dir();
     if legacy.join("db.sqlite").exists() {
-        println!("  legacy DB present: {}", legacy.join("db.sqlite").display());
+        println!(
+            "  legacy DB present: {}",
+            legacy.join("db.sqlite").display()
+        );
         println!("  → run `clawket migrate --dry-run` to preview");
     } else {
         println!("  no legacy lattice DB detected");

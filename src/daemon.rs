@@ -39,7 +39,13 @@ fn search_candidates() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(bin_dir) = exe.parent() {
             // 2. Plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd
-            out.push(bin_dir.join("..").join("daemon").join("bin").join("clawketd"));
+            out.push(
+                bin_dir
+                    .join("..")
+                    .join("daemon")
+                    .join("bin")
+                    .join("clawketd"),
+            );
             // 3. Sibling layout
             out.push(bin_dir.join("clawketd"));
         }
@@ -49,7 +55,11 @@ fn search_candidates() -> Vec<PathBuf> {
     let data_home = std::env::var("XDG_DATA_HOME")
         .map(PathBuf::from)
         .ok()
-        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".local/share")));
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local/share"))
+        });
     if let Some(base) = data_home {
         out.push(base.join("clawket").join("bin").join("clawketd"));
     }

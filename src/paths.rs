@@ -38,4 +38,3 @@ pub fn socket_path() -> PathBuf {
 pub fn pid_path() -> PathBuf {
     cache_dir().join("clawketd.pid")
 }
-

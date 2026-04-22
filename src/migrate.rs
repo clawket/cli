@@ -38,21 +38,14 @@ pub fn run(dry_run: bool, from: Option<String>, force: bool) -> Result<()> {
     }
 
     if let Some(parent) = target_db.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    std::fs::copy(&legacy_db, &target_db).with_context(|| {
-        format!(
-            "copy {} -> {}",
-            legacy_db.display(),
-            target_db.display()
-        )
-    })?;
+    std::fs::copy(&legacy_db, &target_db)
+        .with_context(|| format!("copy {} -> {}", legacy_db.display(), target_db.display()))?;
 
     let marker = legacy_db.with_extension("sqlite.migrated-to-clawket");
-    std::fs::rename(&legacy_db, &marker).with_context(|| {
-        format!("rename {} -> {}", legacy_db.display(), marker.display())
-    })?;
+    std::fs::rename(&legacy_db, &marker)
+        .with_context(|| format!("rename {} -> {}", legacy_db.display(), marker.display()))?;
 
     println!("migrated OK");
     println!("  legacy renamed to: {}", marker.display());

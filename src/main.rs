@@ -986,7 +986,11 @@ async fn main() -> Result<()> {
         Command::Doctor => {
             return doctor::run().await;
         }
-        Command::Migrate { dry_run, from, force } => {
+        Command::Migrate {
+            dry_run,
+            from,
+            force,
+        } => {
             return migrate::run(dry_run, from, force);
         }
         _ => {}
