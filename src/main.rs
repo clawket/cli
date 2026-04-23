@@ -49,11 +49,11 @@ enum Command {
     Mcp,
     /// Diagnose Clawket installation (daemon, binaries, paths, connectivity).
     Doctor,
-    /// Migrate legacy lattice data to clawket XDG paths.
+    /// Migrate legacy lattice data to clawket XDG paths. Defaults to dry-run; pass --execute to apply.
     Migrate {
-        /// Show what would be migrated without copying
+        /// Actually perform the migration. Without this flag, migrate runs as a preview.
         #[arg(long)]
-        dry_run: bool,
+        execute: bool,
         /// Legacy data directory to migrate from (default: $XDG_DATA_HOME/lattice)
         #[arg(long)]
         from: Option<String>,
@@ -143,7 +143,7 @@ enum ProjectAction {
         /// Working directory to associate (defaults to current dir)
         #[arg(long)]
         cwd: Option<String>,
-        /// Short uppercase key for ticket numbers (e.g. LAT → LAT-1, LAT-2)
+        /// Short uppercase key for ticket numbers (e.g. APP → APP-1, APP-2)
         #[arg(long)]
         key: Option<String>,
     },
@@ -235,7 +235,7 @@ enum PlanAction {
     List {
         /// Filter by project ID
         #[arg(long)]
-        project_id: Option<String>,
+        project: Option<String>,
         /// Filter by status: draft, active, completed
         #[arg(long)]
         status: Option<String>,
@@ -318,7 +318,7 @@ enum UnitAction {
     List {
         /// Filter by plan ID
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
     },
     /// Update unit properties
     Update {
@@ -369,7 +369,7 @@ enum CycleAction {
     List {
         /// Filter by project ID
         #[arg(long)]
-        project_id: Option<String>,
+        project: Option<String>,
         /// Filter by status: planning, active, completed
         #[arg(long)]
         status: Option<String>,
@@ -403,17 +403,6 @@ enum CycleAction {
     Complete {
         /// Cycle ID
         id: String,
-    },
-    /// List tasks assigned to this cycle
-    Tasks {
-        /// Cycle ID
-        id: String,
-    },
-    /// List backlog tasks (not assigned to any cycle) for a project
-    Backlog {
-        /// Project ID
-        #[arg(long)]
-        project: String,
     },
 }
 
@@ -468,16 +457,22 @@ enum TaskAction {
     List {
         /// Filter by unit ID
         #[arg(long)]
-        unit_id: Option<String>,
+        unit: Option<String>,
         /// Filter by plan ID
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
         /// Filter by status: todo, in_progress, blocked, done, cancelled
         #[arg(long)]
         status: Option<String>,
         /// Filter by Claude Code agent_id (from SubagentStart hook)
         #[arg(long)]
         agent_id: Option<String>,
+        /// Filter by cycle ID (conflicts with --no-cycle)
+        #[arg(long, conflicts_with = "no_cycle")]
+        cycle: Option<String>,
+        /// Only tasks with no cycle assigned (backlog)
+        #[arg(long, conflicts_with = "cycle")]
+        no_cycle: bool,
     },
     /// Update task fields. Status values: todo, in_progress, blocked, done, cancelled. Pass empty string ("") to --cycle to detach (move to backlog).
     Update {
@@ -495,9 +490,9 @@ enum TaskAction {
         /// Agent or person responsible
         #[arg(long)]
         assignee: Option<String>,
-        #[arg(long, hide = true)]
+        #[arg(long, env = "CLAWKET_SESSION_ID", hide = true)]
         session_id: Option<String>,
-        #[arg(long, default_value = "main", hide = true)]
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
         agent: String,
         /// Priority: critical, high, medium, low
         #[arg(long)]
@@ -515,7 +510,7 @@ enum TaskAction {
         #[arg(long)]
         cycle: Option<String>,
         /// Claude Code agent_id (from SubagentStart hook)
-        #[arg(long, hide = true)]
+        #[arg(long, env = "CLAWKET_AGENT_ID", hide = true)]
         agent_id: Option<String>,
         /// Add a comment along with the update
         #[arg(long, allow_hyphen_values = true)]
@@ -530,17 +525,59 @@ enum TaskAction {
     AppendBody {
         /// Task ID
         id: String,
-        /// Text to append to the body
-        #[arg(long, allow_hyphen_values = true)]
+        /// Text to append to the body (positional)
+        #[arg(allow_hyphen_values = true)]
         text: String,
     },
-    /// Search tasks by keyword (FTS5) across title and body
+    /// Search tasks (FTS5 keyword / vector semantic / hybrid) across title and body
     Search {
         /// Search query
         query: String,
+        /// Search mode: keyword | semantic | hybrid
+        #[arg(long, default_value = "keyword")]
+        mode: String,
         /// Maximum number of results
         #[arg(long, default_value = "20")]
         limit: u32,
+    },
+    /// Mark task as done (alias for `task update --status done`)
+    Complete {
+        /// Task ID (TASK-ULID or ticket number)
+        id: String,
+        /// Optional comment recorded alongside the status change
+        #[arg(long, allow_hyphen_values = true)]
+        comment: Option<String>,
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
+        agent: String,
+    },
+    /// Cancel a task (alias for `task update --status cancelled`)
+    Cancel {
+        /// Task ID (TASK-ULID or ticket number)
+        id: String,
+        /// Reason captured as a comment
+        #[arg(long, allow_hyphen_values = true)]
+        reason: Option<String>,
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
+        agent: String,
+    },
+    /// Block a task on an external dependency (alias for `task update --status blocked`)
+    Block {
+        /// Task ID (TASK-ULID or ticket number)
+        id: String,
+        /// Blocker description captured as a comment
+        #[arg(long, allow_hyphen_values = true)]
+        reason: Option<String>,
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
+        agent: String,
+    },
+    /// Unblock a blocked task back to todo (alias for `task update --status todo`)
+    Unblock {
+        /// Task ID (TASK-ULID or ticket number)
+        id: String,
+        #[arg(long, allow_hyphen_values = true)]
+        comment: Option<String>,
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
+        agent: String,
     },
 }
 
@@ -572,23 +609,46 @@ enum ArtifactAction {
         /// Parent artifact ID (for hierarchical wiki structure)
         #[arg(long)]
         parent: Option<String>,
+        /// Artifact scope: rag | reference | archive (default: reference)
+        #[arg(long)]
+        scope: Option<String>,
     },
     /// View an artifact by ID
     View {
         /// Artifact ID
         id: String,
     },
+    /// Update artifact fields (title, content, scope, type)
+    Update {
+        /// Artifact ID
+        id: String,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// Replace content (markdown). Pass "" to clear
+        #[arg(long, allow_hyphen_values = true)]
+        content: Option<String>,
+        /// Content format: md | txt | code
+        #[arg(long)]
+        content_format: Option<String>,
+        /// New scope: rag | reference | archive
+        #[arg(long)]
+        scope: Option<String>,
+        /// Author for this change (audit trail)
+        #[arg(long)]
+        created_by: Option<String>,
+    },
     /// List artifacts with optional filters
     List {
         /// Filter by task ID
         #[arg(long)]
-        task_id: Option<String>,
+        task: Option<String>,
         /// Filter by unit ID
         #[arg(long)]
-        unit_id: Option<String>,
+        unit: Option<String>,
         /// Filter by plan ID
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
         /// Filter by type
         #[arg(long)]
         r#type: Option<String>,
@@ -619,10 +679,10 @@ enum ArtifactAction {
         cwd: String,
         /// Attach imported artifacts to this plan
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
         /// Attach imported artifacts to this unit
         #[arg(long)]
-        unit_id: Option<String>,
+        unit: Option<String>,
         /// Scope for imported artifacts: rag | reference | archive
         #[arg(long, default_value = "reference")]
         scope: String,
@@ -637,10 +697,10 @@ enum ArtifactAction {
         cwd: String,
         /// Export only artifacts attached to this plan
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
         /// Export only artifacts attached to this unit
         #[arg(long)]
-        unit_id: Option<String>,
+        unit: Option<String>,
     },
 }
 
@@ -650,13 +710,12 @@ enum RunAction {
     /// Start a run record for a task (usually auto-created by hooks on task start)
     Start {
         /// Task ID to start a run for
-        #[arg(long)]
         task: String,
         /// Claude Code session ID (internal, from hook)
-        #[arg(long, hide = true)]
+        #[arg(long, env = "CLAWKET_SESSION_ID", hide = true)]
         session_id: Option<String>,
         /// Agent executing the run
-        #[arg(long, default_value = "main")]
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main")]
         agent: String,
     },
     /// Finish an active run with a result
@@ -664,7 +723,6 @@ enum RunAction {
         /// Run ID
         id: String,
         /// Result: success | failure | cancelled
-        #[arg(long)]
         result: String,
         /// Free-form notes about the run outcome
         #[arg(long, allow_hyphen_values = true)]
@@ -679,9 +737,9 @@ enum RunAction {
     List {
         /// Filter by task ID
         #[arg(long)]
-        task_id: Option<String>,
+        task: Option<String>,
         /// Filter by session ID
-        #[arg(long, hide = true)]
+        #[arg(long, env = "CLAWKET_SESSION_ID", hide = true)]
         session_id: Option<String>,
     },
 }
@@ -709,18 +767,18 @@ enum QuestionAction {
         #[arg(long, default_value = "prompt")]
         origin: String,
         /// Who asked the question
-        #[arg(long, default_value = "main")]
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main")]
         asked_by: String,
     },
     /// Answer an open question
     Answer {
         /// Question ID
         id: String,
-        /// Answer text
-        #[arg(long, allow_hyphen_values = true)]
+        /// Answer text (positional)
+        #[arg(allow_hyphen_values = true)]
         text: String,
         /// Who answered: human | main | <agent-name>
-        #[arg(long, default_value = "human")]
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "human")]
         by: String,
     },
     /// View question details by ID
@@ -732,13 +790,13 @@ enum QuestionAction {
     List {
         /// Filter by plan ID
         #[arg(long)]
-        plan_id: Option<String>,
+        plan: Option<String>,
         /// Filter by unit ID
         #[arg(long)]
-        unit_id: Option<String>,
+        unit: Option<String>,
         /// Filter by task ID
         #[arg(long)]
-        task_id: Option<String>,
+        task: Option<String>,
         /// If true, show only unanswered questions
         #[arg(long)]
         pending: Option<bool>,
@@ -750,21 +808,19 @@ enum QuestionAction {
 enum CommentAction {
     /// Add a comment to a task (used for progress notes, decisions, status change rationale)
     Create {
-        /// Target task ID
-        #[arg(long)]
+        /// Target task ID (positional)
         task: String,
         /// Comment body (markdown supported)
-        #[arg(long, allow_hyphen_values = true)]
+        #[arg(allow_hyphen_values = true)]
         body: String,
         /// Comment author (defaults to "main")
-        #[arg(long, default_value = "main")]
+        #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main")]
         author: String,
     },
     /// List comments for a task
     List {
-        /// Task ID
-        #[arg(long)]
-        task_id: String,
+        /// Target task ID (positional)
+        task: String,
     },
     /// Delete a comment by ID
     Delete {
@@ -950,6 +1006,27 @@ fn print_yaml(val: &serde_json::Value, indent: usize) {
     }
 }
 
+async fn task_transition<F>(
+    c: &client::HttpClient,
+    id: &str,
+    status: &str,
+    comment: Option<&str>,
+    agent: &str,
+    output: F,
+) -> Result<()>
+where
+    F: Fn(&serde_json::Value),
+{
+    let mut payload = json!({ "status": status, "_agent": agent });
+    if let Some(text) = comment {
+        payload["_comment"] = json!(text);
+        payload["_author"] = json!(agent);
+    }
+    let val = client::request(c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?;
+    output(&val);
+    Ok(())
+}
+
 fn query_string(params: &[(&str, &Option<String>)]) -> String {
     let pairs: Vec<String> = params
         .iter()
@@ -981,17 +1058,17 @@ async fn main() -> Result<()> {
             return daemon::run(action).await;
         }
         Command::Mcp => {
-            return mcp::run();
+            return mcp::run().await;
         }
         Command::Doctor => {
             return doctor::run().await;
         }
         Command::Migrate {
-            dry_run,
+            execute,
             from,
             force,
         } => {
-            return migrate::run(dry_run, from, force);
+            return migrate::run(!execute, from, force);
         }
         _ => {}
     }
@@ -1154,8 +1231,8 @@ async fn main() -> Result<()> {
                 );
             }
             PlanAction::View { id } => output(&client::get(&c, &format!("/plans/{id}")).await?),
-            PlanAction::List { project_id, status } => {
-                let qs = query_string(&[("project_id", &project_id), ("status", &status)]);
+            PlanAction::List { project, status } => {
+                let qs = query_string(&[("project_id", &project), ("status", &status)]);
                 output(&client::get(&c, &format!("/plans{qs}")).await?);
             }
             PlanAction::Update {
@@ -1238,8 +1315,8 @@ async fn main() -> Result<()> {
                 );
             }
             UnitAction::View { id } => output(&client::get(&c, &format!("/units/{id}")).await?),
-            UnitAction::List { plan_id } => {
-                let qs = query_string(&[("plan_id", &plan_id)]);
+            UnitAction::List { plan } => {
+                let qs = query_string(&[("plan_id", &plan)]);
                 output(&client::get(&c, &format!("/units{qs}")).await?);
             }
             UnitAction::Update {
@@ -1295,8 +1372,8 @@ async fn main() -> Result<()> {
                 );
             }
             CycleAction::View { id } => output(&client::get(&c, &format!("/cycles/{id}")).await?),
-            CycleAction::List { project_id, status } => {
-                let qs = query_string(&[("project_id", &project_id), ("status", &status)]);
+            CycleAction::List { project, status } => {
+                let qs = query_string(&[("project_id", &project), ("status", &status)]);
                 output(&client::get(&c, &format!("/cycles{qs}")).await?);
             }
             CycleAction::Update {
@@ -1335,13 +1412,6 @@ async fn main() -> Result<()> {
                     )
                     .await?,
                 );
-            }
-            CycleAction::Tasks { id } => {
-                output(&client::get(&c, &format!("/cycles/{id}/tasks")).await?);
-            }
-            CycleAction::Backlog { project } => {
-                let qs = format!("?project_id={}", urlenc(&project));
-                output(&client::get(&c, &format!("/backlog{qs}")).await?);
             }
         },
 
@@ -1383,16 +1453,24 @@ async fn main() -> Result<()> {
             }
             TaskAction::View { id } => output(&client::get(&c, &format!("/tasks/{id}")).await?),
             TaskAction::List {
-                unit_id,
-                plan_id,
+                unit,
+                plan,
                 status,
                 agent_id,
+                cycle,
+                no_cycle,
             } => {
+                let cycle_filter = if no_cycle {
+                    Some("null".to_string())
+                } else {
+                    cycle
+                };
                 let qs = query_string(&[
-                    ("unit_id", &unit_id),
-                    ("plan_id", &plan_id),
+                    ("unit_id", &unit),
+                    ("plan_id", &plan),
                     ("status", &status),
                     ("agent_id", &agent_id),
+                    ("cycle_id", &cycle_filter),
                 ]);
                 output(&client::get(&c, &format!("/tasks{qs}")).await?);
             }
@@ -1447,19 +1525,13 @@ async fn main() -> Result<()> {
                 if let Some(v) = agent_id {
                     payload["agent_id"] = json!(v);
                 }
+                if let Some(ref text) = comment {
+                    payload["_comment"] = json!(text);
+                    payload["_author"] = json!(assignee.as_deref().unwrap_or(&agent));
+                }
                 output(
                     &client::request(&c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?,
                 );
-                if let Some(text) = comment {
-                    let author = assignee.as_deref().unwrap_or(&agent);
-                    client::request(
-                        &c,
-                        "POST",
-                        &format!("/tasks/{id}/comments"),
-                        Some(json!({"task_id": id, "author": author, "body": text})),
-                    )
-                    .await?;
-                }
             }
             TaskAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/tasks/{id}"), None).await?);
@@ -1475,9 +1547,25 @@ async fn main() -> Result<()> {
                     .await?,
                 );
             }
-            TaskAction::Search { query, limit } => {
-                let qs = format!("?q={}&limit={limit}", urlenc(&query));
+            TaskAction::Search { query, mode, limit } => {
+                let qs = format!(
+                    "?q={}&mode={}&limit={limit}",
+                    urlenc(&query),
+                    urlenc(&mode)
+                );
                 output(&client::get(&c, &format!("/tasks/search{qs}")).await?);
+            }
+            TaskAction::Complete { id, comment, agent } => {
+                task_transition(&c, &id, "done", comment.as_deref(), &agent, output).await?;
+            }
+            TaskAction::Cancel { id, reason, agent } => {
+                task_transition(&c, &id, "cancelled", reason.as_deref(), &agent, output).await?;
+            }
+            TaskAction::Block { id, reason, agent } => {
+                task_transition(&c, &id, "blocked", reason.as_deref(), &agent, output).await?;
+            }
+            TaskAction::Unblock { id, comment, agent } => {
+                task_transition(&c, &id, "todo", comment.as_deref(), &agent, output).await?;
             }
         },
 
@@ -1492,27 +1580,49 @@ async fn main() -> Result<()> {
                 content,
                 content_format,
                 parent,
+                scope,
             } => {
                 output(&client::request(&c, "POST", "/artifacts", Some(json!({
                     "type": r#type, "title": title, "task_id": task, "unit_id": unit,
                     "plan_id": plan, "content": content.unwrap_or_default(), "content_format": content_format,
-                    "parent_id": parent,
+                    "parent_id": parent, "scope": scope,
                 }))).await?);
             }
             ArtifactAction::View { id } => {
                 output(&client::get(&c, &format!("/artifacts/{id}")).await?)
             }
+            ArtifactAction::Update {
+                id,
+                title,
+                content,
+                content_format,
+                scope,
+                created_by,
+            } => {
+                let mut payload = serde_json::Map::new();
+                if let Some(v) = title { payload.insert("title".into(), json!(v)); }
+                if let Some(v) = content { payload.insert("content".into(), json!(v)); }
+                if let Some(v) = content_format { payload.insert("content_format".into(), json!(v)); }
+                if let Some(v) = scope { payload.insert("scope".into(), json!(v)); }
+                if let Some(v) = created_by { payload.insert("created_by".into(), json!(v)); }
+                output(&client::request(
+                    &c,
+                    "PATCH",
+                    &format!("/artifacts/{id}"),
+                    Some(serde_json::Value::Object(payload)),
+                ).await?);
+            }
             ArtifactAction::List {
-                task_id,
-                unit_id,
-                plan_id,
+                task,
+                unit,
+                plan,
                 r#type,
             } => {
                 let type_opt = r#type;
                 let qs = query_string(&[
-                    ("task_id", &task_id),
-                    ("unit_id", &unit_id),
-                    ("plan_id", &plan_id),
+                    ("task_id", &task),
+                    ("unit_id", &unit),
+                    ("plan_id", &plan),
                     ("type", &type_opt),
                 ]);
                 output(&client::get(&c, &format!("/artifacts{qs}")).await?);
@@ -1537,19 +1647,19 @@ async fn main() -> Result<()> {
             }
             ArtifactAction::Import {
                 cwd,
-                plan_id,
-                unit_id,
+                plan,
+                unit,
                 scope,
                 dry_run,
             } => {
                 output(&client::request(&c, "POST", "/artifacts/import", Some(json!({
-                    "cwd": cwd, "plan_id": plan_id, "unit_id": unit_id, "scope": scope, "dry_run": dry_run,
+                    "cwd": cwd, "plan_id": plan, "unit_id": unit, "scope": scope, "dry_run": dry_run,
                 }))).await?);
             }
             ArtifactAction::Export {
                 cwd,
-                plan_id,
-                unit_id,
+                plan,
+                unit,
             } => {
                 output(
                     &client::request(
@@ -1557,7 +1667,7 @@ async fn main() -> Result<()> {
                         "POST",
                         "/artifacts/export",
                         Some(json!({
-                            "cwd": cwd, "plan_id": plan_id, "unit_id": unit_id,
+                            "cwd": cwd, "plan_id": plan, "unit_id": unit,
                         })),
                     )
                     .await?,
@@ -1599,10 +1709,10 @@ async fn main() -> Result<()> {
             }
             RunAction::View { id } => output(&client::get(&c, &format!("/runs/{id}")).await?),
             RunAction::List {
-                task_id,
+                task,
                 session_id,
             } => {
-                let qs = query_string(&[("task_id", &task_id), ("session_id", &session_id)]);
+                let qs = query_string(&[("task_id", &task), ("session_id", &session_id)]);
                 output(&client::get(&c, &format!("/runs{qs}")).await?);
             }
         },
@@ -1622,8 +1732,8 @@ async fn main() -> Result<()> {
                     .await?,
                 );
             }
-            CommentAction::List { task_id } => {
-                output(&client::get(&c, &format!("/tasks/{task_id}/comments")).await?);
+            CommentAction::List { task } => {
+                output(&client::get(&c, &format!("/tasks/{task}/comments")).await?);
             }
             CommentAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/comments/{id}"), None).await?);
@@ -1671,16 +1781,16 @@ async fn main() -> Result<()> {
                 output(&client::get(&c, &format!("/questions/{id}")).await?)
             }
             QuestionAction::List {
-                plan_id,
-                unit_id,
-                task_id,
+                plan,
+                unit,
+                task,
                 pending,
             } => {
                 let pending_str = pending.map(|b| b.to_string());
                 let qs = query_string(&[
-                    ("plan_id", &plan_id),
-                    ("unit_id", &unit_id),
-                    ("task_id", &task_id),
+                    ("plan_id", &plan),
+                    ("unit_id", &unit),
+                    ("task_id", &task),
                     ("pending", &pending_str),
                 ]);
                 output(&client::get(&c, &format!("/questions{qs}")).await?);
