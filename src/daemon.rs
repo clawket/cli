@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::DaemonAction;
 use crate::paths;
@@ -37,6 +38,13 @@ fn search_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
 
     if let Ok(exe) = std::env::current_exe() {
+        // Canonicalize to resolve symlinks. macOS `_NSGetExecutablePath` (which
+        // backs current_exe) does not follow symlinks, so when the CLI is
+        // invoked through `~/.local/bin/clawket -> <pluginRoot>/bin/clawket`,
+        // exe.parent() would be ~/.local/bin and the plugin layout candidates
+        // below would all miss. Linux `/proc/self/exe` already resolves, but
+        // canonicalize is harmless on both.
+        let exe = exe.canonicalize().unwrap_or(exe);
         if let Some(bin_dir) = exe.parent() {
             // 2. Plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd
             out.push(
@@ -80,6 +88,23 @@ fn is_running(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
+/// Resolve clawketd log file path. Mirrors daemon/src/paths.rs:
+/// CLAWKET_STATE_DIR → $XDG_STATE_HOME/clawket → $HOME/.local/state/clawket.
+fn log_file_path() -> Option<PathBuf> {
+    if let Ok(state) = std::env::var("CLAWKET_STATE_DIR") {
+        return Some(PathBuf::from(state).join("clawketd.log"));
+    }
+    let base = std::env::var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".local/state"))
+        })?;
+    Some(base.join("clawket").join("clawketd.log"))
+}
+
 pub async fn run(action: DaemonAction) -> Result<()> {
     match action {
         DaemonAction::Start => cmd_start(),
@@ -92,6 +117,8 @@ pub async fn run(action: DaemonAction) -> Result<()> {
     }
 }
 
+/// Run clawketd with `subcmd` to completion and collect output.
+/// Only used for stop/status — NOT for start (which would block).
 fn run_clawketd(subcmd: &str) -> Result<std::process::Output> {
     let (program, extra_args) = clawketd_cmd();
     let output = Command::new(&program)
@@ -117,6 +144,23 @@ fn print_output(out: &std::process::Output) {
     }
 }
 
+/// Start clawketd in the background.
+///
+/// `clawketd start` runs the HTTP server in the foreground (see
+/// daemon/src/main.rs::run_daemon). This wrapper must NOT wait on it, or the
+/// SessionStart hook (which invokes `clawket daemon start` synchronously) would
+/// block for the entire daemon lifetime.
+///
+/// Detach strategy:
+///   - stdin:  /dev/null
+///   - stdout+stderr: appended to $XDG_STATE_HOME/clawket/clawketd.log
+///   - new process group (process_group(0)) so SIGHUP/SIGINT on the caller
+///     doesn't propagate to the daemon
+///   - spawn() only; never wait()
+///
+/// After spawn, poll the pid file + liveness for up to 5s so the caller
+/// gets a synchronous "ready" signal, but fall back to "starting" rather
+/// than timing out the hook.
 fn cmd_start() -> Result<()> {
     if let Some(pid) = read_pid() {
         if is_running(pid) {
@@ -124,11 +168,108 @@ fn cmd_start() -> Result<()> {
             return Ok(());
         }
     }
-    let out = run_clawketd("start")?;
-    print_output(&out);
-    if !out.status.success() {
-        bail!("clawketd start failed (exit code: {:?})", out.status.code());
+
+    let (program, extra_args) = clawketd_cmd();
+
+    let (stdout_target, stderr_target, log_path) = match log_file_path() {
+        Some(path) => {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            match fs::OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(file) => {
+                    let clone = match file.try_clone() {
+                        Ok(c) => c,
+                        Err(_) => {
+                            // Should not happen in practice; fall back to null.
+                            return spawn_null_detached(&program, &extra_args);
+                        }
+                    };
+                    (Stdio::from(file), Stdio::from(clone), Some(path))
+                }
+                Err(_) => (Stdio::null(), Stdio::null(), None),
+            }
+        }
+        None => (Stdio::null(), Stdio::null(), None),
+    };
+
+    let mut cmd = Command::new(&program);
+    cmd.args(&extra_args)
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(stdout_target)
+        .stderr(stderr_target);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // New process group: SIGHUP/SIGINT delivered to the parent's group
+        // (e.g. the hook's shell) doesn't reach the daemon.
+        cmd.process_group(0);
     }
+
+    let child = cmd.spawn().map_err(|e| {
+        anyhow::anyhow!(
+            "failed to spawn '{program} start': {e}\nMake sure clawketd is in your PATH or set CLAWKET_DAEMON_BIN"
+        )
+    })?;
+    let child_pid = child.id();
+    // Intentionally drop `child` without wait() — clawketd runs in its own
+    // process group with stdio redirected to the log file, so it becomes a
+    // reparented background process when the CLI exits. No zombie: clawketd
+    // becomes a child of init (pid 1) when this process exits.
+    drop(child);
+
+    // Poll for readiness: pid file appears AND process is alive.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(pid) = read_pid() {
+            if is_running(pid) {
+                if let Some(path) = &log_path {
+                    println!(
+                        "clawketd: started (pid={pid}, log={})",
+                        path.display()
+                    );
+                } else {
+                    println!("clawketd: started (pid={pid})");
+                }
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            // Don't fail — just report "starting". Status/health will confirm
+            // later. Avoids false-positive hook timeouts when the daemon is
+            // doing a first-time migration or embedding model load.
+            let hint = match &log_path {
+                Some(p) => format!(" (tail log: {})", p.display()),
+                None => String::new(),
+            };
+            println!("clawketd: starting (spawned pid={child_pid}){hint}");
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Fallback when log file can't be opened: spawn with /dev/null stdio.
+fn spawn_null_detached(program: &str, extra_args: &[String]) -> Result<()> {
+    let mut cmd = Command::new(program);
+    cmd.args(extra_args)
+        .arg("start")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let child = cmd.spawn().map_err(|e| {
+        anyhow::anyhow!("failed to spawn '{program} start': {e}")
+    })?;
+    let pid = child.id();
+    drop(child);
+    println!("clawketd: starting (spawned pid={pid}, log=/dev/null)");
     Ok(())
 }
 
