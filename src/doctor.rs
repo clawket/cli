@@ -74,7 +74,12 @@ pub async fn run() -> Result<()> {
             "  legacy DB present: {}",
             legacy.join("db.sqlite").display()
         );
-        println!("  → run `clawket migrate --dry-run` to preview");
+        println!("  ⚠ Migration is NOT supported — schema changed too much across versions.");
+        println!("  ⚠ Clawket treats every install as a fresh start.");
+        println!(
+            "  ⚠ If you no longer need the legacy data, remove {} manually.",
+            legacy.display()
+        );
     } else {
         println!("  no legacy lattice DB detected");
     }
