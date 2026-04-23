@@ -273,9 +273,61 @@ fn spawn_null_detached(program: &str, extra_args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Stop clawketd, escalating to SIGKILL if graceful SIGTERM times out.
+///
+/// The daemon's own `stop` subcommand sends SIGTERM then polls for up to 10s.
+/// When the daemon is wedged (e.g. a shutdown-race bug in an older build where
+/// the signal handler fires before the server's graceful_shutdown future has
+/// registered its waiter), it never exits. In that case the child `clawketd
+/// stop` returns with a non-zero exit and a "did not exit within 10s" error.
+///
+/// Silent-failure symptom: callers of `clawket daemon restart` would then see
+/// `cmd_start` report "already running" on the old pid, with no indication the
+/// stop actually failed. Fix: detect non-zero exit, SIGKILL the pid, and clean
+/// the stale pid/port files so `cmd_start` can spawn a fresh daemon.
 fn cmd_stop() -> Result<()> {
     let out = run_clawketd("stop")?;
     print_output(&out);
+    if out.status.success() {
+        return Ok(());
+    }
+
+    let Some(pid) = read_pid() else {
+        // No pid file left — nothing to escalate against.
+        return Ok(());
+    };
+    if !is_running(pid) {
+        let _ = fs::remove_file(paths::pid_path());
+        let _ = fs::remove_file(paths::port_path());
+        return Ok(());
+    }
+
+    #[cfg(unix)]
+    {
+        eprintln!(
+            "clawketd: graceful SIGTERM timed out; escalating to SIGKILL on pid {pid}"
+        );
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        // Poll briefly; kill -9 should take effect immediately but the kernel
+        // still needs a tick to reap.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if !is_running(pid) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if is_running(pid) {
+            bail!("clawketd pid {pid} still alive after SIGKILL");
+        }
+        let _ = fs::remove_file(paths::pid_path());
+        let _ = fs::remove_file(paths::port_path());
+        eprintln!("clawketd: pid {pid} force-killed");
+    }
+    #[cfg(not(unix))]
+    {
+        bail!("cannot escalate stop on non-unix platform");
+    }
     Ok(())
 }
 
