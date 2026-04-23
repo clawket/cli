@@ -1,6 +1,6 @@
 [package]
 name = "clawket"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Clawket CLI — Rust command-line interface for the Clawket work management daemon"
 license = "MIT"
