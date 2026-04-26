@@ -1084,6 +1084,10 @@ async fn main() -> Result<()> {
                     .to_string_lossy()
                     .to_string()
             });
+            // Resolve relative paths so they match registered project cwds (always absolute).
+            let cwd = std::fs::canonicalize(&cwd)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or(cwd);
             let qs = format!("?cwd={}&show={}", urlenc(&cwd), urlenc(&show));
             let val = client::get(&c, &format!("/dashboard{qs}")).await?;
             // Print the context string directly (not JSON) for hook injection
