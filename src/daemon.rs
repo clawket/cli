@@ -10,12 +10,9 @@ use crate::paths;
 /// Returns (program, extra_args) for running clawketd.
 /// Search order:
 ///   1. CLAWKET_DAEMON_BIN env (explicit override)
-///   2. <cli-exe>/../daemon/bin/clawketd (plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd)
-///   3. <cli-exe>/clawketd (sibling layout: both binaries in same dir, e.g. ~/.cargo/bin/)
-///   4. $XDG_DATA_HOME/clawket/bin/clawketd (user install)
-///   5. PATH "clawketd"
+///   2..N. paths::daemon_bin_candidates() — shared with `clawket doctor`
+///   N+1. PATH "clawketd"
 fn clawketd_cmd() -> (String, Vec<String>) {
-    // 1. Explicit env var
     if let Ok(bin) = std::env::var("CLAWKET_DAEMON_BIN") {
         let parts: Vec<String> = bin.split_whitespace().map(String::from).collect();
         if !parts.is_empty() {
@@ -23,56 +20,14 @@ fn clawketd_cmd() -> (String, Vec<String>) {
         }
     }
 
-    for candidate in search_candidates() {
+    for (candidate, _label) in paths::daemon_bin_candidates() {
         if candidate.exists() {
             let canonical = candidate.canonicalize().unwrap_or(candidate);
             return (canonical.to_string_lossy().into_owned(), vec![]);
         }
     }
 
-    // Final fallback: PATH
     ("clawketd".to_string(), vec![])
-}
-
-fn search_candidates() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-
-    if let Ok(exe) = std::env::current_exe() {
-        // Canonicalize to resolve symlinks. macOS `_NSGetExecutablePath` (which
-        // backs current_exe) does not follow symlinks, so when the CLI is
-        // invoked through `~/.local/bin/clawket -> <pluginRoot>/bin/clawket`,
-        // exe.parent() would be ~/.local/bin and the plugin layout candidates
-        // below would all miss. Linux `/proc/self/exe` already resolves, but
-        // canonicalize is harmless on both.
-        let exe = exe.canonicalize().unwrap_or(exe);
-        if let Some(bin_dir) = exe.parent() {
-            // 2. Plugin layout: pluginRoot/bin/clawket + pluginRoot/daemon/bin/clawketd
-            out.push(
-                bin_dir
-                    .join("..")
-                    .join("daemon")
-                    .join("bin")
-                    .join("clawketd"),
-            );
-            // 3. Sibling layout
-            out.push(bin_dir.join("clawketd"));
-        }
-    }
-
-    // 4. XDG_DATA_HOME/clawket/bin/clawketd
-    let data_home = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".local/share"))
-        });
-    if let Some(base) = data_home {
-        out.push(base.join("clawket").join("bin").join("clawketd"));
-    }
-
-    out
 }
 
 fn read_pid() -> Option<u32> {
@@ -226,10 +181,7 @@ fn cmd_start() -> Result<()> {
         if let Some(pid) = read_pid() {
             if is_running(pid) {
                 if let Some(path) = &log_path {
-                    println!(
-                        "clawketd: started (pid={pid}, log={})",
-                        path.display()
-                    );
+                    println!("clawketd: started (pid={pid}, log={})", path.display());
                 } else {
                     println!("clawketd: started (pid={pid})");
                 }
@@ -264,9 +216,9 @@ fn spawn_null_detached(program: &str, extra_args: &[String]) -> Result<()> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let child = cmd.spawn().map_err(|e| {
-        anyhow::anyhow!("failed to spawn '{program} start': {e}")
-    })?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to spawn '{program} start': {e}"))?;
     let pid = child.id();
     drop(child);
     println!("clawketd: starting (spawned pid={pid}, log=/dev/null)");
@@ -304,9 +256,7 @@ fn cmd_stop() -> Result<()> {
 
     #[cfg(unix)]
     {
-        eprintln!(
-            "clawketd: graceful SIGTERM timed out; escalating to SIGKILL on pid {pid}"
-        );
+        eprintln!("clawketd: graceful SIGTERM timed out; escalating to SIGKILL on pid {pid}");
         unsafe { libc::kill(pid as i32, libc::SIGKILL) };
         // Poll briefly; kill -9 should take effect immediately but the kernel
         // still needs a tick to reap.
