@@ -10,8 +10,8 @@ use crate::paths;
 /// Returns (program, extra_args) for running clawketd.
 /// Search order:
 ///   1. CLAWKET_DAEMON_BIN env (explicit override)
-///   2..N. paths::daemon_bin_candidates() — shared with `clawket doctor`
-///   N+1. PATH "clawketd"
+///   2. paths::daemon_bin_candidates() — shared with `clawket doctor`
+///   3. PATH "clawketd"
 fn clawketd_cmd() -> (String, Vec<String>) {
     if let Ok(bin) = std::env::var("CLAWKET_DAEMON_BIN") {
         let parts: Vec<String> = bin.split_whitespace().map(String::from).collect();
@@ -117,11 +117,11 @@ fn print_output(out: &std::process::Output) {
 /// gets a synchronous "ready" signal, but fall back to "starting" rather
 /// than timing out the hook.
 fn cmd_start() -> Result<()> {
-    if let Some(pid) = read_pid() {
-        if is_running(pid) {
-            println!("clawketd: already running (pid={pid})");
-            return Ok(());
-        }
+    if let Some(pid) = read_pid()
+        && is_running(pid)
+    {
+        println!("clawketd: already running (pid={pid})");
+        return Ok(());
     }
 
     let (program, extra_args) = clawketd_cmd();
@@ -178,15 +178,15 @@ fn cmd_start() -> Result<()> {
     // Poll for readiness: pid file appears AND process is alive.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Some(pid) = read_pid() {
-            if is_running(pid) {
-                if let Some(path) = &log_path {
-                    println!("clawketd: started (pid={pid}, log={})", path.display());
-                } else {
-                    println!("clawketd: started (pid={pid})");
-                }
-                return Ok(());
+        if let Some(pid) = read_pid()
+            && is_running(pid)
+        {
+            if let Some(path) = &log_path {
+                println!("clawketd: started (pid={pid}, log={})", path.display());
+            } else {
+                println!("clawketd: started (pid={pid})");
             }
+            return Ok(());
         }
         if Instant::now() >= deadline {
             // Don't fail — just report "starting". Status/health will confirm
