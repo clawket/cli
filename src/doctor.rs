@@ -103,30 +103,9 @@ fn resolve_daemon_bin() -> Option<(PathBuf, &'static str)> {
             return Some((p, "CLAWKET_DAEMON_BIN"));
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let plugin = dir.join("..").join("daemon").join("bin").join("clawketd");
-            if plugin.exists() {
-                return Some((plugin, "plugin layout"));
-            }
-            let sibling = dir.join("clawketd");
-            if sibling.exists() {
-                return Some((sibling, "sibling"));
-            }
-        }
-    }
-    let data_home = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .ok()
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".local/share"))
-        });
-    if let Some(base) = data_home {
-        let xdg = base.join("clawket").join("bin").join("clawketd");
-        if xdg.exists() {
-            return Some((xdg, "XDG install"));
+    for (candidate, label) in paths::daemon_bin_candidates() {
+        if candidate.exists() {
+            return Some((candidate, label));
         }
     }
     if let Ok(which) = which("clawketd") {

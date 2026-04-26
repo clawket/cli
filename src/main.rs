@@ -1527,11 +1527,7 @@ async fn main() -> Result<()> {
                 );
             }
             TaskAction::Search { query, mode, limit } => {
-                let qs = format!(
-                    "?q={}&mode={}&limit={limit}",
-                    urlenc(&query),
-                    urlenc(&mode)
-                );
+                let qs = format!("?q={}&mode={}&limit={limit}", urlenc(&query), urlenc(&mode));
                 output(&client::get(&c, &format!("/tasks/search{qs}")).await?);
             }
             TaskAction::Complete { id, comment, agent } => {
@@ -1579,17 +1575,30 @@ async fn main() -> Result<()> {
                 created_by,
             } => {
                 let mut payload = serde_json::Map::new();
-                if let Some(v) = title { payload.insert("title".into(), json!(v)); }
-                if let Some(v) = content { payload.insert("content".into(), json!(v)); }
-                if let Some(v) = content_format { payload.insert("content_format".into(), json!(v)); }
-                if let Some(v) = scope { payload.insert("scope".into(), json!(v)); }
-                if let Some(v) = created_by { payload.insert("created_by".into(), json!(v)); }
-                output(&client::request(
-                    &c,
-                    "PATCH",
-                    &format!("/artifacts/{id}"),
-                    Some(serde_json::Value::Object(payload)),
-                ).await?);
+                if let Some(v) = title {
+                    payload.insert("title".into(), json!(v));
+                }
+                if let Some(v) = content {
+                    payload.insert("content".into(), json!(v));
+                }
+                if let Some(v) = content_format {
+                    payload.insert("content_format".into(), json!(v));
+                }
+                if let Some(v) = scope {
+                    payload.insert("scope".into(), json!(v));
+                }
+                if let Some(v) = created_by {
+                    payload.insert("created_by".into(), json!(v));
+                }
+                output(
+                    &client::request(
+                        &c,
+                        "PATCH",
+                        &format!("/artifacts/{id}"),
+                        Some(serde_json::Value::Object(payload)),
+                    )
+                    .await?,
+                );
             }
             ArtifactAction::List {
                 task,
@@ -1635,11 +1644,7 @@ async fn main() -> Result<()> {
                     "cwd": cwd, "plan_id": plan, "unit_id": unit, "scope": scope, "dry_run": dry_run,
                 }))).await?);
             }
-            ArtifactAction::Export {
-                cwd,
-                plan,
-                unit,
-            } => {
+            ArtifactAction::Export { cwd, plan, unit } => {
                 output(
                     &client::request(
                         &c,
@@ -1687,10 +1692,7 @@ async fn main() -> Result<()> {
                 );
             }
             RunAction::View { id } => output(&client::get(&c, &format!("/runs/{id}")).await?),
-            RunAction::List {
-                task,
-                session_id,
-            } => {
+            RunAction::List { task, session_id } => {
                 let qs = query_string(&[("task_id", &task), ("session_id", &session_id)]);
                 output(&client::get(&c, &format!("/runs{qs}")).await?);
             }
