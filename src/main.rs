@@ -941,8 +941,9 @@ fn print_table(val: &serde_json::Value) {
                 println!(
                     "{}: {}",
                     k,
-                    if s.len() > 80 {
-                        format!("{}...", &s[..77])
+                    if s.chars().count() > 80 {
+                        let truncated: String = s.chars().take(77).collect();
+                        format!("{}...", truncated)
                     } else {
                         s
                     }
