@@ -23,10 +23,6 @@ pub fn cache_dir() -> PathBuf {
     resolve("CLAWKET_CACHE_DIR", "XDG_CACHE_HOME", ".cache")
 }
 
-pub fn data_dir() -> PathBuf {
-    resolve("CLAWKET_DATA_DIR", "XDG_DATA_HOME", ".local/share")
-}
-
 pub fn socket_path() -> PathBuf {
     if let Ok(v) = std::env::var("CLAWKET_SOCKET") {
         PathBuf::from(v)

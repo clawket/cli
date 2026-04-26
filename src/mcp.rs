@@ -141,15 +141,15 @@ impl ClawketMcp {
                 let filtered: Vec<Value> = arr
                     .into_iter()
                     .filter(|a| {
-                        if let Some(tf) = &args.type_filter {
-                            if a.get("type").and_then(|v| v.as_str()) != Some(tf) {
-                                return false;
-                            }
+                        if let Some(tf) = &args.type_filter
+                            && a.get("type").and_then(|v| v.as_str()) != Some(tf)
+                        {
+                            return false;
                         }
-                        if let Some(pid) = &args.plan_id {
-                            if a.get("plan_id").and_then(|v| v.as_str()) != Some(pid.as_str()) {
-                                return false;
-                            }
+                        if let Some(pid) = &args.plan_id
+                            && a.get("plan_id").and_then(|v| v.as_str()) != Some(pid.as_str())
+                        {
+                            return false;
                         }
                         true
                     })
@@ -196,10 +196,10 @@ impl ClawketMcp {
                 let filtered: Vec<Value> = arr
                     .into_iter()
                     .filter(|t| {
-                        if let Some(st) = &args.status {
-                            if t.get("status").and_then(|v| v.as_str()) != Some(st.as_str()) {
-                                return false;
-                            }
+                        if let Some(st) = &args.status
+                            && t.get("status").and_then(|v| v.as_str()) != Some(st.as_str())
+                        {
+                            return false;
                         }
                         true
                     })
@@ -578,12 +578,13 @@ fn issue_regex() -> &'static Regex {
 fn extract_markers(text: &str, re: &Regex, cap: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for m in re.captures_iter(text) {
-        if let Some(line) = m.get(1).map(|s| s.as_str().trim().to_string()) {
-            if !line.is_empty() && !out.contains(&line) {
-                out.push(line);
-                if out.len() >= cap {
-                    break;
-                }
+        if let Some(line) = m.get(1).map(|s| s.as_str().trim().to_string())
+            && !line.is_empty()
+            && !out.contains(&line)
+        {
+            out.push(line);
+            if out.len() >= cap {
+                break;
             }
         }
     }
