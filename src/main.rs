@@ -3,6 +3,7 @@ mod daemon;
 mod doctor;
 mod mcp;
 mod paths;
+mod verify;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -48,6 +49,13 @@ enum Command {
     Mcp,
     /// Diagnose Clawket installation (daemon, binaries, paths, connectivity).
     Doctor,
+    /// Post-install smoke: probe daemon health + create/delete a throwaway project.
+    /// `--dry-run` skips the daemon contact and just prints the step list.
+    Verify {
+        /// Print steps without contacting the daemon. Exits 0 on parse-only success.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage projects
     #[command(alias = "proj")]
     Project {
@@ -1051,6 +1059,9 @@ async fn main() -> Result<()> {
         Command::Doctor => {
             return doctor::run().await;
         }
+        Command::Verify { dry_run } => {
+            return verify::run(dry_run).await;
+        }
         _ => {}
     }
 
@@ -1076,6 +1087,7 @@ async fn main() -> Result<()> {
         Command::Daemon { .. } => unreachable!(),
         Command::Mcp => unreachable!(),
         Command::Doctor => unreachable!(),
+        Command::Verify { .. } => unreachable!(),
 
         Command::Dashboard { cwd, show } => {
             let cwd = cwd.unwrap_or_else(|| {
