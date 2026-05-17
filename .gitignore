@@ -1,4 +1,19 @@
+.DS_Store
 /target
 **/*.rs.bk
 *.log
-.DS_Store
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
