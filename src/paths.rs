@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").expect("HOME not set"))
@@ -21,6 +21,26 @@ fn resolve(override_env: &str, xdg_var: &str, xdg_fallback: &str) -> PathBuf {
 
 pub fn cache_dir() -> PathBuf {
     resolve("CLAWKET_CACHE_DIR", "XDG_CACHE_HOME", ".cache")
+}
+
+pub fn data_dir() -> PathBuf {
+    resolve("CLAWKET_DATA_DIR", "XDG_DATA_HOME", ".local/share")
+}
+
+pub fn config_dir() -> PathBuf {
+    resolve("CLAWKET_CONFIG_DIR", "XDG_CONFIG_HOME", ".config")
+}
+
+pub fn state_dir() -> PathBuf {
+    resolve("CLAWKET_STATE_DIR", "XDG_STATE_HOME", ".local/state")
+}
+
+// LM-8 invariant predicate. Mirrors `daemon::paths::path_overlaps_plugin_dir`
+// (the daemon owns the runtime guard; the CLI only needs to *report* the same
+// status from `clawket doctor`). Duplicated rather than shared because the
+// crates have no dependency edge today.
+pub fn path_overlaps_plugin_dir(p: &Path) -> bool {
+    p.to_string_lossy().contains("/.claude/plugins/")
 }
 
 pub fn socket_path() -> PathBuf {
@@ -126,5 +146,36 @@ mod tests {
     #[test]
     fn empty_when_nothing_known() {
         assert!(daemon_bin_candidates_inner(None, None).is_empty());
+    }
+
+    #[test]
+    fn detects_plugin_dir_overlap() {
+        for bad in [
+            "/Users/u/.claude/plugins/data/clawket-x/db.sqlite",
+            "/Users/u/.claude/plugins/cache/clawket-x",
+            "/home/u/.claude/plugins/data/clawket",
+        ] {
+            assert!(
+                path_overlaps_plugin_dir(Path::new(bad)),
+                "missed overlap: {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_paths_do_not_overlap() {
+        for ok in [
+            "/Users/u/.local/share/clawket",
+            "/Users/u/.cache/clawket",
+            "/Users/u/.config/clawket",
+            "/Users/u/.local/state/clawket",
+            "/Users/u/.claude-config/clawket",   // .claude prefix but not .claude/plugins
+            "/Users/u/projects/plugins/clawket", // plugins but not .claude/plugins
+        ] {
+            assert!(
+                !path_overlaps_plugin_dir(Path::new(ok)),
+                "false positive: {ok}"
+            );
+        }
     }
 }

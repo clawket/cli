@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use crate::client::{self, HttpClient};
+use crate::daemon_autostart;
 
 const SNIPPET_MAX: usize = 300;
 const DECISION_SNIPPET_MAX: usize = 500;
@@ -22,7 +23,7 @@ const LIMIT_MAX: u32 = 30;
 // ========== Input schemas ==========
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct SearchArtifactsArgs {
+pub struct SearchKnowledgeArgs {
     #[schemars(description = "검색 쿼리 (자연어 또는 키워드)")]
     pub query: String,
     #[schemars(description = "검색 모드. keyword=FTS5, semantic=벡터, hybrid=병합(기본)")]
@@ -32,11 +33,11 @@ pub struct SearchArtifactsArgs {
     #[serde(default)]
     pub limit: Option<u32>,
     #[schemars(
-        description = "아티팩트 타입 필터 (decision|design|architecture|spec|note|doc|reference)"
+        description = "knowledge 타입 필터 (decision|design|architecture|spec|note|doc|reference)"
     )]
     #[serde(default)]
     pub type_filter: Option<String>,
-    #[schemars(description = "특정 Plan에 속한 아티팩트만 (선택)")]
+    #[schemars(description = "특정 Plan에 속한 knowledge 만 (선택)")]
     #[serde(default)]
     pub plan_id: Option<String>,
 }
@@ -120,17 +121,17 @@ impl ClawketMcp {
 #[tool_router]
 impl ClawketMcp {
     #[tool(
-        name = "clawket_search_artifacts",
-        description = "프로젝트의 설계 문서·결정사항·스펙(아티팩트 scope=rag)을 시맨틱/키워드 하이브리드로 검색합니다. 이전 세션의 결정사항을 찾거나, 특정 주제의 문서를 탐색할 때 사용하세요. 반환: 제목, 타입, 스니펫(300자), 유사도. archive·reference 스코프는 접근 불가 — rag 스코프만 반환합니다."
+        name = "clawket_search_knowledge",
+        description = "프로젝트의 설계 문서·결정사항·스펙을 시맨틱/키워드 하이브리드로 검색합니다. 이전 세션의 결정사항을 찾거나, 특정 주제의 문서를 탐색할 때 사용하세요. 반환: 제목, 타입, 스니펫(300자), 유사도."
     )]
-    async fn clawket_search_artifacts(
+    async fn clawket_search_knowledge(
         &self,
-        Parameters(args): Parameters<SearchArtifactsArgs>,
+        Parameters(args): Parameters<SearchKnowledgeArgs>,
     ) -> Result<CallToolResult, McpError> {
         let mode = args.mode.as_deref().unwrap_or("hybrid");
         let limit = args.limit.unwrap_or(10).min(LIMIT_MAX);
         let path = format!(
-            "/artifacts/search?q={}&mode={}&scope=rag&limit={}",
+            "/knowledge/search?q={}&mode={}&limit={}",
             urlenc(&args.query),
             urlenc(mode),
             limit
@@ -310,7 +311,7 @@ impl ClawketMcp {
 
     #[tool(
         name = "clawket_get_task_context",
-        description = "특정 Task의 주변 맥락(관련 아티팩트, 관계, 코멘트, 이력)을 일괄 조회합니다. \"이 티켓이 무슨 배경으로 만들어졌는지\" 파악할 때 사용. 기본 include: artifacts, relations. comments/history는 명시적으로 추가. 아티팩트는 scope=rag만 스니펫 반환."
+        description = "특정 Task의 주변 맥락(관련 knowledge, 관계, 코멘트, 이력)을 일괄 조회합니다. \"이 티켓이 무슨 배경으로 만들어졌는지\" 파악할 때 사용. 기본 include: knowledge, relations. comments/history는 명시적으로 추가."
     )]
     async fn clawket_get_task_context(
         &self,
@@ -318,7 +319,7 @@ impl ClawketMcp {
     ) -> Result<CallToolResult, McpError> {
         let include_set: HashSet<String> = args
             .include
-            .unwrap_or_else(|| vec!["artifacts".into(), "relations".into()])
+            .unwrap_or_else(|| vec!["knowledge".into(), "relations".into()])
             .into_iter()
             .collect();
 
@@ -333,12 +334,12 @@ impl ClawketMcp {
             .unwrap_or(&args.task_id)
             .to_string();
 
-        let want_art = include_set.contains("artifacts");
+        let want_kn = include_set.contains("knowledge");
         let want_rel = include_set.contains("relations");
         let want_cmt = include_set.contains("comments");
         let want_hst = include_set.contains("history");
 
-        let art_path = format!("/artifacts?task_id={}", urlenc(&task_id));
+        let kn_path = format!("/knowledge?task_id={}", urlenc(&task_id));
         let rel_path = format!("/tasks/{}/relations", urlenc(&task_id));
         let cmt_path = format!("/tasks/{}/comments", urlenc(&task_id));
         let hst_path = format!(
@@ -346,8 +347,8 @@ impl ClawketMcp {
             urlenc(&task_id)
         );
 
-        let (arts, rels, cmts, hsts) = tokio::join!(
-            fetch_optional(&self.http, want_art, &art_path),
+        let (kns, rels, cmts, hsts) = tokio::join!(
+            fetch_optional(&self.http, want_kn, &kn_path),
             fetch_optional(&self.http, want_rel, &rel_path),
             fetch_optional(&self.http, want_cmt, &cmt_path),
             fetch_optional(&self.http, want_hst, &hst_path),
@@ -372,11 +373,10 @@ impl ClawketMcp {
             }),
         );
 
-        if want_art {
-            let arr = arts
+        if want_kn {
+            let arr = kns
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|a| a.get("scope").and_then(|v| v.as_str()) == Some("rag"))
                 .map(|a| {
                     json!({
                         "id": a.get("id"),
@@ -389,7 +389,7 @@ impl ClawketMcp {
                     })
                 })
                 .collect::<Vec<_>>();
-            response.insert("artifacts".to_string(), Value::Array(arr));
+            response.insert("knowledge".to_string(), Value::Array(arr));
         }
         if want_rel {
             let mut groups = serde_json::Map::new();
@@ -439,30 +439,35 @@ impl ClawketMcp {
 
     #[tool(
         name = "clawket_get_recent_decisions",
-        description = "최근 결정(Artifact type=decision, scope=rag)을 목록 조회합니다. 세션 시작 시 \"지난 회차에서 어떤 결정이 있었지?\" 확인용. 자연어 검색이 아닌 타입 기반 필터 — 키워드 탐색은 clawket_search_artifacts를 사용하세요."
+        description = "최근 결정(knowledge type=decision)을 목록 조회합니다. 세션 시작 시 \"지난 회차에서 어떤 결정이 있었지?\" 확인용. 자연어 검색이 아닌 타입 기반 필터 — 키워드 탐색은 clawket_search_knowledge를 사용하세요."
     )]
     async fn clawket_get_recent_decisions(
         &self,
         Parameters(args): Parameters<GetRecentDecisionsArgs>,
     ) -> Result<CallToolResult, McpError> {
         let limit = args.limit.unwrap_or(10).min(LIMIT_MAX) as usize;
-        let mut path = String::from("/artifacts?type=decision");
+        let mut path = String::from("/knowledge?type=decision");
         if let Some(pid) = &args.plan_id {
             path.push_str(&format!("&plan_id={}", urlenc(pid)));
         }
         match client::get(&self.http, &path).await {
             Ok(val) => {
                 let mut arr: Vec<Value> = val.as_array().cloned().unwrap_or_default();
-                arr.retain(|a| a.get("scope").and_then(|v| v.as_str()) == Some("rag"));
                 if let Some(since) = args.since_ts {
+                    // since_ts is legacy epoch seconds; created_at is now ISO 8601
+                    // string after the v3 ISO migration. Compare via parsed timestamp.
                     arr.retain(|a| {
-                        a.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0) >= since
+                        let s = a.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                        chrono::DateTime::parse_from_rfc3339(s)
+                            .map(|dt| dt.timestamp() >= since)
+                            .unwrap_or(false)
                     });
                 }
+                // ISO 8601 strings sort lexicographically == chronologically.
                 arr.sort_by(|a, b| {
-                    let ba = b.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let aa = a.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
-                    ba.cmp(&aa)
+                    let ba = b.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                    let aa = a.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                    ba.cmp(aa)
                 });
                 arr.truncate(limit);
                 let mapped: Vec<Value> = arr
@@ -486,6 +491,11 @@ impl ClawketMcp {
             Err(e) => Ok(error_json(&e.to_string())),
         }
     }
+
+    // clawket_execute_task, clawket_walk_task_tree, clawket_validate_envelope,
+    // clawket_decompose_task were removed in v3.0 (FIX-CLI-003 / FIX-CLI-009).
+    // These v11 Execute/Envelope tools are breaking changes. Use the CLI
+    // subcommands (`clawket execute`, `clawket task tree`, etc.) instead.
 }
 
 #[tool_handler]
@@ -494,8 +504,9 @@ impl ServerHandler for ClawketMcp {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions(
                 "Clawket read-only RAG tools. Requires clawketd running (`clawket daemon start`). \
-                 Tools: clawket_search_artifacts, clawket_search_tasks, clawket_find_similar_tasks, \
-                 clawket_get_task_context, clawket_get_recent_decisions.",
+                 Tools: clawket_search_knowledge, clawket_search_tasks, clawket_find_similar_tasks, \
+                 clawket_get_task_context, clawket_get_recent_decisions. \
+                 All tools are read-only — no mutations.",
             )
             .with_server_info(Implementation::new("clawket", env!("CARGO_PKG_VERSION")))
     }
@@ -504,6 +515,22 @@ impl ServerHandler for ClawketMcp {
 // ========== Entry ==========
 
 pub async fn run() -> Result<()> {
+    // FIX-CLI-002: init tracing subscriber with env-filter so RUST_LOG controls
+    // verbosity without spamming the MCP stdio protocol with log lines.
+    // Only set up if not already initialized (e.g. from a test harness).
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_writer(std::io::stderr)
+        .try_init();
+
+    // FIX-CLI-001: ensure daemon is running before starting the MCP server.
+    // If auto-start fails, the individual tool calls will get connection errors
+    // which are returned as structured error_json — not a panic.
+    daemon_autostart::ensure_daemon()?;
+
     let http = client::make_client();
     let handler = ClawketMcp::new(http);
     let service = handler
@@ -516,8 +543,23 @@ pub async fn run() -> Result<()> {
 
 // ========== Helpers ==========
 
+/// Maximum total response size for MCP tool results (US-CLAWKET-CLI-MCP-006).
+/// Claude Code silently truncates tool results over 50 KB; we cut at 100 KB
+/// to give a clean "truncated" message instead of a silent mid-JSON cut.
+const MCP_RESPONSE_MAX_BYTES: usize = 100 * 1024; // 100 KB
+
 fn success_json(v: &Value) -> CallToolResult {
     let text = serde_json::to_string_pretty(v).unwrap_or_else(|_| "[]".to_string());
+    if text.len() > MCP_RESPONSE_MAX_BYTES {
+        // Truncate gracefully: return first N bytes + a truncation notice.
+        let truncated: String = text.chars().take(MCP_RESPONSE_MAX_BYTES / 4).collect();
+        let notice = format!(
+            "{}\n\n[TRUNCATED: response exceeded {}KB limit. Use more specific filters or reduce --limit.]",
+            truncated,
+            MCP_RESPONSE_MAX_BYTES / 1024
+        );
+        return CallToolResult::success(vec![Content::text(notice)]);
+    }
     CallToolResult::success(vec![Content::text(text)])
 }
 
@@ -608,3 +650,5 @@ fn urlenc(s: &str) -> String {
         .replace('=', "%3D")
         .replace('#', "%23")
 }
+
+// walk_node removed in v3.0 — only used by clawket_walk_task_tree which was dropped.

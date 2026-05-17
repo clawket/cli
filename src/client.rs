@@ -70,6 +70,27 @@ pub async fn request(
     path: &str,
     json_body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value> {
+    let (status, val) = request_raw(client, method, path, json_body).await?;
+    if !status.is_success() {
+        bail!(
+            "{}",
+            val.get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("unknown error")
+        );
+    }
+    Ok(val)
+}
+
+/// Like `request` but returns the raw `(status, body)` pair so callers can
+/// inspect structured `details` on non-success responses (e.g. lease 409
+/// holder info). Connect-level failures still bail.
+pub async fn request_raw(
+    client: &HttpClient,
+    method: &str,
+    path: &str,
+    json_body: Option<serde_json::Value>,
+) -> Result<(hyper::StatusCode, serde_json::Value)> {
     let uri: hyper::Uri = format!("http://localhost{path}")
         .parse()
         .context("invalid URI")?;
@@ -91,16 +112,8 @@ pub async fn request(
     let body_bytes = resp.into_body().collect().await?.to_bytes();
 
     if body_bytes.is_empty() {
-        return Ok(serde_json::json!({}));
+        return Ok((status, serde_json::json!({})));
     }
     let val: serde_json::Value = serde_json::from_slice(&body_bytes)?;
-    if !status.is_success() {
-        bail!(
-            "{}",
-            val.get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("unknown error")
-        );
-    }
-    Ok(val)
+    Ok((status, val))
 }

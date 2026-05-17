@@ -69,6 +69,7 @@ pub async fn run(action: DaemonAction) -> Result<()> {
             cmd_stop()?;
             cmd_start()
         }
+        DaemonAction::Log { lines, follow } => cmd_log(lines, follow),
     }
 }
 
@@ -238,6 +239,23 @@ fn spawn_null_detached(program: &str, extra_args: &[String]) -> Result<()> {
 /// stop actually failed. Fix: detect non-zero exit, SIGKILL the pid, and clean
 /// the stale pid/port files so `cmd_start` can spawn a fresh daemon.
 fn cmd_stop() -> Result<()> {
+    // If there is no pid file and the daemon binary cannot be found /
+    // fails immediately, treat as "not running" and exit 0 (US-CLAWKET-CLI-DMN-004).
+    let pid_before = read_pid();
+    if pid_before.is_none() {
+        // No pid file — daemon is not running (or was never started).
+        println!("clawketd: not running");
+        return Ok(());
+    }
+    let pid_val = pid_before.unwrap();
+    if !is_running(pid_val) {
+        // Stale pid file — clean up and report not running.
+        let _ = fs::remove_file(paths::pid_path());
+        let _ = fs::remove_file(paths::port_path());
+        println!("clawketd: not running (stale pid file removed)");
+        return Ok(());
+    }
+
     let out = run_clawketd("stop")?;
     print_output(&out);
     if out.status.success() {
@@ -286,6 +304,44 @@ fn cmd_status() -> Result<()> {
     print_output(&out);
     if !out.status.success() {
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Show or tail daemon log file (US-CLAWKET-CLI-DMN-006).
+fn cmd_log(lines: u32, follow: bool) -> Result<()> {
+    let log_path = match log_file_path() {
+        Some(p) => p,
+        None => bail!("cannot determine log file path (HOME not set?)"),
+    };
+    if !log_path.exists() {
+        println!("clawketd: log file not found at {}", log_path.display());
+        println!("  hint: start the daemon first with `clawket daemon start`");
+        return Ok(());
+    }
+
+    if follow {
+        // Use `tail -f` for live streaming
+        let status = std::process::Command::new("tail")
+            .arg("-f")
+            .arg("-n")
+            .arg(lines.to_string())
+            .arg(&log_path)
+            .status()?;
+        if !status.success() {
+            bail!("tail -f failed with status: {status}");
+        }
+    } else {
+        // Use `tail -n <lines>` to show last N lines
+        let out = std::process::Command::new("tail")
+            .arg("-n")
+            .arg(lines.to_string())
+            .arg(&log_path)
+            .output()?;
+        print_output(&out);
+        if !out.status.success() {
+            bail!("tail failed with status: {:?}", out.status);
+        }
     }
     Ok(())
 }
