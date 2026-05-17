@@ -72,7 +72,10 @@ pub fn ensure_daemon() -> Result<()> {
             // Can't create the lock file (permissions?). Log and try to spawn
             // anyway — worst case two processes race, and the second one's
             // spawn will be rejected by the daemon itself.
-            eprintln!("clawket: warning: cannot open spawn lock {}: {e}", lock_path.display());
+            eprintln!(
+                "clawket: warning: cannot open spawn lock {}: {e}",
+                lock_path.display()
+            );
             return try_spawn_and_wait();
         }
     };
@@ -237,10 +240,5 @@ fn wait_for_socket(reason: &str) -> Result<()> {
 use std::os::unix::io::AsRawFd;
 
 fn flock_exclusive_nb(fd: std::os::unix::io::RawFd) -> i32 {
-    unsafe {
-        libc::flock(
-            fd,
-            libc::LOCK_EX | libc::LOCK_NB,
-        )
-    }
+    unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) }
 }

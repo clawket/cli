@@ -176,7 +176,6 @@ enum Command {
     },
 
     // ===== Dashboard views =====
-
     /// Open the Timeline view (chronological task/cycle ribbon) in the web dashboard.
     Timeline {
         /// Project ID (defaults to cwd project)
@@ -206,7 +205,6 @@ enum Command {
     },
 
     // ===== Watch =====
-
     /// Stream live task / cycle / run events from the daemon (Server-Sent
     /// Events). Filter by project, task, or cycle. Runs until Ctrl-C.
     Watch {
@@ -225,7 +223,6 @@ enum Command {
     },
 
     // ===== Replay =====
-
     /// Replay the run history of a task for post-mortem inspection. Prints
     /// each run's start/finish, agent, result, and notes in order.
     Replay {
@@ -237,7 +234,6 @@ enum Command {
     },
 
     // ===== Backup / Restore / Migrate =====
-
     /// Export all Clawket data (DB + attached knowledge entries) to a
     /// portable tar.gz archive for cross-machine transfer or offsite backup.
     Backup {
@@ -272,7 +268,6 @@ enum Command {
     },
 
     // ===== Config =====
-
     /// Read or write Clawket configuration values stored under
     /// `~/.config/clawket/`. Subcommands: get | set | unset | list.
     Config {
@@ -281,7 +276,6 @@ enum Command {
     },
 
     // ===== Self-update / version-check =====
-
     /// Download and install the latest Clawket release from GitHub Releases.
     /// Replaces the local CLI + daemon binaries (atomic swap; existing daemon
     /// process keeps running until next restart).
@@ -299,7 +293,6 @@ enum Command {
     VersionCheck,
 
     // ===== Knowledge shortcuts =====
-
     /// Find tasks semantically similar to a query (vector search over task
     /// title + body). Top-level alias for `clawket task search --mode semantic`.
     FindSimilar {
@@ -333,7 +326,6 @@ enum Command {
     },
 
     // ===== Discover-loop =====
-
     /// Discover-loop automation — round-by-round QA dispatch, TSV evidence
     /// sync, and 3-way convergence query. Subcommands cover plan/cycle/unit
     /// auto-generation, batch dispatch manifests, TSV schema validation,
@@ -1308,7 +1300,6 @@ enum ConfigAction {
 #[derive(Subcommand)]
 enum DiscoverAction {
     // ---- A. Plan/cycle/unit auto-generation ----
-
     /// Auto-generate a round plan (draft → active) + active cycle + QA
     /// units in one call. Plan title: "<domain> Round <round>". Units:
     /// "QA-<domain> <area>" with mode=parallel. The cycle is anchored to
@@ -1349,7 +1340,6 @@ enum DiscoverAction {
     },
 
     // ---- B. Dispatch metadata + TSV schema validation ----
-
     /// Output a batch dispatch manifest for a plan's units. Reads scenario
     /// knowledge counts and generates BATCH-<ULID> identifiers. Warns if any
     /// unit exceeds the batch_size cap.
@@ -1374,7 +1364,6 @@ enum DiscoverAction {
     BatchId,
 
     // ---- C. Bulk sync transcription ----
-
     /// Transcribe TSV evidence rows into Clawket tasks. Pure transcription —
     /// no reasoning inside sync. Status mapping: pass→done, defect→blocked,
     /// scenario_error→cancelled. Idempotent: existing tasks (same
@@ -1394,7 +1383,6 @@ enum DiscoverAction {
     },
 
     // ---- D. 3-way convergence query ----
-
     /// Show defect / scenario_error / pass counts for the active round,
     /// with regression detection against the previous round.
     Status {
@@ -1665,7 +1653,12 @@ mod commands {
                     .get("changed_files_in_scope")
                     .and_then(|v| v.as_array())
                     .map(|a| a.len())
-                    .or_else(|| drift.get("total_changed").and_then(|v| v.as_u64()).map(|n| n as usize))
+                    .or_else(|| {
+                        drift
+                            .get("total_changed")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n as usize)
+                    })
                     .unwrap_or(0);
                 let total = drift
                     .get("total_changed")
@@ -1820,7 +1813,6 @@ mod commands {
                 }
             }
         }
-
     }
 
     pub mod task {
@@ -2043,10 +2035,9 @@ mod commands {
                 match hint {
                     "tiny" | "small" => AtomicGate::Refuse {
                         size_hint: hint.to_string(),
-                        suggestion:
-                            "Already atomic — process in a single session. \
+                        suggestion: "Already atomic — process in a single session. \
                              To override, raise atomic_size_hint via plan re-import."
-                                .to_string(),
+                            .to_string(),
                     },
                     _ => AtomicGate::Allow,
                 }
@@ -2072,10 +2063,7 @@ mod commands {
             /// violation entry when truncation occurred. Mirrors the
             /// shape `check_policy_violations` produces so the CLI's JSON
             /// output stays uniform (one schema, two sources of caps).
-            pub fn apply_size_cap(
-                suggestions: &mut Vec<Value>,
-                hint: &str,
-            ) -> Option<Value> {
+            pub fn apply_size_cap(suggestions: &mut Vec<Value>, hint: &str) -> Option<Value> {
                 let cap = size_max_subtasks(hint)?;
                 if (suggestions.len() as u64) <= cap {
                     return None;
@@ -2181,9 +2169,19 @@ mod commands {
                 fn build_suggestions_strategy_changes_scope_hint() {
                     let c = vec!["x".into()];
                     let by_repo = build_suggestions("p", &c, "by-repo");
-                    assert!(by_repo[0]["scope_hint"].as_str().unwrap().contains("by-repo"));
+                    assert!(
+                        by_repo[0]["scope_hint"]
+                            .as_str()
+                            .unwrap()
+                            .contains("by-repo")
+                    );
                     let scoped = build_suggestions("p", &c, "scoped");
-                    assert!(scoped[0]["scope_hint"].as_str().unwrap().contains("by surface"));
+                    assert!(
+                        scoped[0]["scope_hint"]
+                            .as_str()
+                            .unwrap()
+                            .contains("by surface")
+                    );
                 }
 
                 #[test]
@@ -2208,9 +2206,10 @@ mod commands {
                     let env = fixture_envelope_with_array_criteria();
                     let mut s = vec![json!({}), json!({}), json!({})];
                     let v = check_policy_violations(&env, &mut s, 5);
-                    assert!(v.iter().any(|x|
-                        x["field"] == "max_depth" && x["severity"] == "error"
-                    ));
+                    assert!(
+                        v.iter()
+                            .any(|x| x["field"] == "max_depth" && x["severity"] == "error")
+                    );
                 }
 
                 #[test]
@@ -2218,8 +2217,8 @@ mod commands {
                     let env = json!({"success_criteria": ["x"]});
                     let mut s = vec![json!({})];
                     let v = check_policy_violations(&env, &mut s, 2);
-                    assert!(v.iter().any(|x|
-                        x["field"] == "decomposition_policy" && x["severity"] == "warning"
+                    assert!(v.iter().any(
+                        |x| x["field"] == "decomposition_policy" && x["severity"] == "warning"
                     ));
                 }
 
@@ -2228,9 +2227,10 @@ mod commands {
                     let env = fixture_envelope_with_array_criteria();
                     let mut s: Vec<Value> = Vec::new();
                     let v = check_policy_violations(&env, &mut s, 2);
-                    assert!(v.iter().any(|x|
-                        x["field"] == "success_criteria" && x["severity"] == "error"
-                    ));
+                    assert!(
+                        v.iter()
+                            .any(|x| x["field"] == "success_criteria" && x["severity"] == "error")
+                    );
                 }
 
                 #[test]
@@ -2333,7 +2333,10 @@ mod commands {
                     let mut s: Vec<Value> = (0..9).map(|i| json!({"idx": i})).collect();
                     let v = apply_size_cap(&mut s, "large");
                     assert_eq!(s.len(), 5, "large must truncate to 5");
-                    assert!(v.is_some(), "large with 9 suggestions must produce a violation");
+                    assert!(
+                        v.is_some(),
+                        "large with 9 suggestions must produce a violation"
+                    );
                 }
 
                 #[test]
@@ -2349,7 +2352,11 @@ mod commands {
                     let mut s: Vec<Value> = (0..7).map(|i| json!({"idx": i})).collect();
                     let v = apply_size_cap(&mut s, "small"); // refused upstream, but
                     // also covers any hint that returns None from size_max_subtasks
-                    assert_eq!(s.len(), 7, "no cap defined for `small` (gate refuses earlier)");
+                    assert_eq!(
+                        s.len(),
+                        7,
+                        "no cap defined for `small` (gate refuses earlier)"
+                    );
                     assert!(v.is_none());
                 }
 
@@ -2483,7 +2490,11 @@ mod commands {
                             let was_last = last_at_depth.get(k).copied().unwrap_or(true);
                             line.push_str(if was_last { "    " } else { "│   " });
                         }
-                        line.push_str(if is_last[i] { "└── " } else { "├── " });
+                        line.push_str(if is_last[i] {
+                            "└── "
+                        } else {
+                            "├── "
+                        });
                     }
                     line.push_str(&format!(
                         "{} [{}] {}",
@@ -2629,11 +2640,7 @@ mod commands {
                     assert!(lines[1].starts_with("├── "));
                     // A.1 must keep the parent's vertical bar because A has
                     // a younger sibling B coming up.
-                    assert!(
-                        lines[2].starts_with("│   └── "),
-                        "got: {:?}",
-                        lines[2]
-                    );
+                    assert!(lines[2].starts_with("│   └── "), "got: {:?}", lines[2]);
                     assert!(lines[3].starts_with("└── "));
                 }
 
@@ -2659,7 +2666,11 @@ mod commands {
                     let long = "a".repeat(200);
                     let nodes = vec![n(0, "LM-1", "todo", &long)];
                     let lines = render_tree_lines(&nodes, false);
-                    assert!(lines[0].ends_with('…'), "expected ellipsis, got {:?}", lines[0]);
+                    assert!(
+                        lines[0].ends_with('…'),
+                        "expected ellipsis, got {:?}",
+                        lines[0]
+                    );
                 }
 
                 #[test]
@@ -2753,7 +2764,11 @@ mod commands {
             /// the export the same way they read the originals.
             pub fn render_markdown(b: &PlanBundle) -> String {
                 let mut out = String::new();
-                let title = b.plan.get("title").and_then(|v| v.as_str()).unwrap_or("(untitled)");
+                let title = b
+                    .plan
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(untitled)");
                 out.push_str(&format!("# {title}\n\n"));
 
                 if let Some(desc) = b.plan.get("description").and_then(|v| v.as_str()) {
@@ -2785,7 +2800,10 @@ mod commands {
                 out.push_str("## Meta\n\n");
                 let id = plan.get("id").and_then(|v| v.as_str()).unwrap_or("?");
                 let status = plan.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                let project = plan.get("project_id").and_then(|v| v.as_str()).unwrap_or("?");
+                let project = plan
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
                 out.push_str(&format!("- id: `{id}`\n"));
                 out.push_str(&format!("- project: `{project}`\n"));
                 out.push_str(&format!("- status: `{status}`\n"));
@@ -3069,7 +3087,10 @@ mod commands {
                     let md = render_markdown(&bundle_simple());
                     let intent_pos = md.find("`intent`").unwrap();
                     let success_pos = md.find("`success_criteria`").unwrap();
-                    assert!(intent_pos < success_pos, "intent must precede success_criteria");
+                    assert!(
+                        intent_pos < success_pos,
+                        "intent must precede success_criteria"
+                    );
                 }
 
                 #[test]
@@ -3127,8 +3148,7 @@ mod commands {
                     assert!(md.contains("T-3 --> T-1"));
                     assert!(md.contains("T-3 --> T-2"));
                     let edges = collect_depends_on(&b);
-                    let mermaid_edge_count =
-                        md.lines().filter(|l| l.contains(" --> ")).count();
+                    let mermaid_edge_count = md.lines().filter(|l| l.contains(" --> ")).count();
                     assert!(
                         mermaid_edge_count >= edges.len(),
                         "mermaid DAG nodes/edges must cover all depends_on (LM-86 success_criterion c)"
@@ -3300,7 +3320,10 @@ mod commands {
                         ("# Spec Lock-in Plan", "H1"),
                         ("## Meta", "Meta"),
                         ("## Overview", "Overview"),
-                        ("## 표기 규약 (Envelope 19 fields per ADR-0001)", "Envelope legend"),
+                        (
+                            "## 표기 규약 (Envelope 19 fields per ADR-0001)",
+                            "Envelope legend",
+                        ),
                         ("## Unit 0: Foundations", "Unit 0"),
                         ("## Unit 1: Delivery", "Unit 1"),
                         ("## Dependency Graph", "Dependency Graph"),
@@ -3329,9 +3352,18 @@ mod commands {
                 fn meta_block_shape_matches_spec() {
                     let md = render_markdown(&fixture_bundle());
                     let meta = extract_section(&md, "## Meta");
-                    assert!(meta.contains("- id: `PLAN-FIXTURE`"), "Meta missing backticked id: {meta}");
-                    assert!(meta.contains("- project: `PROJ-X`"), "Meta missing project: {meta}");
-                    assert!(meta.contains("- status: `active`"), "Meta missing status: {meta}");
+                    assert!(
+                        meta.contains("- id: `PLAN-FIXTURE`"),
+                        "Meta missing backticked id: {meta}"
+                    );
+                    assert!(
+                        meta.contains("- project: `PROJ-X`"),
+                        "Meta missing project: {meta}"
+                    );
+                    assert!(
+                        meta.contains("- status: `active`"),
+                        "Meta missing status: {meta}"
+                    );
                 }
 
                 /// strict-format.md §3 — Overview header MUST be exactly the
@@ -3409,7 +3441,10 @@ mod commands {
                 fn envelope_bullet_value_encodings_match_spec() {
                     let md = render_markdown(&fixture_bundle());
                     let blk = extract_task_block(&md, "### First (T-A)");
-                    assert!(blk.contains("- `version`: 1"), "integer must render bare: {blk}");
+                    assert!(
+                        blk.contains("- `version`: 1"),
+                        "integer must render bare: {blk}"
+                    );
                     assert!(
                         blk.contains("- `intent`: \"first intent\""),
                         "string must render JSON-quoted: {blk}"
@@ -3422,7 +3457,9 @@ mod commands {
                     // alphabetically — that's the canonical form the
                     // strict importer must accept.
                     assert!(
-                        blk.contains("- `context_refs`: [{\"id\":\"DEC-1\",\"kind\":\"decision\"}]"),
+                        blk.contains(
+                            "- `context_refs`: [{\"id\":\"DEC-1\",\"kind\":\"decision\"}]"
+                        ),
                         "object array must render as JSON one-line with sorted keys: {blk}"
                     );
                 }
@@ -3434,12 +3471,27 @@ mod commands {
                 fn dependency_graph_uses_canonical_mermaid_form() {
                     let md = render_markdown(&fixture_bundle());
                     let dag = extract_section(&md, "## Dependency Graph");
-                    assert!(dag.contains("```mermaid"), "fence language must be mermaid: {dag}");
-                    assert!(dag.contains("graph LR\n"), "first line must be `graph LR` (no flowchart): {dag}");
-                    assert!(dag.contains("  T-B --> T-A"), "edge T-B→T-A missing or wrong indent: {dag}");
+                    assert!(
+                        dag.contains("```mermaid"),
+                        "fence language must be mermaid: {dag}"
+                    );
+                    assert!(
+                        dag.contains("graph LR\n"),
+                        "first line must be `graph LR` (no flowchart): {dag}"
+                    );
+                    assert!(
+                        dag.contains("  T-B --> T-A"),
+                        "edge T-B→T-A missing or wrong indent: {dag}"
+                    );
                     assert!(dag.contains("  T-C --> T-B"), "edge T-C→T-B missing: {dag}");
-                    assert!(!dag.contains("flowchart"), "strict-format.md §6 forbids `flowchart`: {dag}");
-                    assert!(!dag.contains("graph TD"), "strict-format.md §6 forbids `graph TD`: {dag}");
+                    assert!(
+                        !dag.contains("flowchart"),
+                        "strict-format.md §6 forbids `flowchart`: {dag}"
+                    );
+                    assert!(
+                        !dag.contains("graph TD"),
+                        "strict-format.md §6 forbids `graph TD`: {dag}"
+                    );
                 }
 
                 #[test]
@@ -3472,9 +3524,9 @@ mod commands {
                 }
 
                 fn extract_section<'a>(md: &'a str, heading: &str) -> &'a str {
-                    let start = md.find(heading).unwrap_or_else(|| {
-                        panic!("heading {heading:?} missing in:\n{md}")
-                    });
+                    let start = md
+                        .find(heading)
+                        .unwrap_or_else(|| panic!("heading {heading:?} missing in:\n{md}"));
                     let after = &md[start..];
                     let next_h2 = after[heading.len()..]
                         .find("\n## ")
@@ -3486,9 +3538,9 @@ mod commands {
                 }
 
                 fn extract_task_block<'a>(md: &'a str, heading: &str) -> &'a str {
-                    let start = md.find(heading).unwrap_or_else(|| {
-                        panic!("task heading {heading:?} missing in:\n{md}")
-                    });
+                    let start = md
+                        .find(heading)
+                        .unwrap_or_else(|| panic!("task heading {heading:?} missing in:\n{md}"));
                     let after = &md[start..];
                     let next = after[heading.len()..]
                         .find("\n### ")
@@ -3562,7 +3614,11 @@ async fn run_main() -> Result<()> {
         Command::Mcp => {
             return mcp::run().await;
         }
-        Command::Doctor { json, plan, escalation } => {
+        Command::Doctor {
+            json,
+            plan,
+            escalation,
+        } => {
             return doctor::run(json, plan, escalation).await;
         }
         Command::Verify { dry_run } => {
@@ -3639,7 +3695,10 @@ async fn run_main() -> Result<()> {
             // R3 DOGFOOD-009 fix: surface active-plan-count warning to stderr
             // before printing context to stdout. Hook consumers can grep stderr.
             if let Some(w) = val.get("active_plan_warning") {
-                let count = w.get("active_plan_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let count = w
+                    .get("active_plan_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let level = w.get("level").and_then(|v| v.as_str()).unwrap_or("warn");
                 eprintln!(
                     "[clawket dashboard] {} active plan count={} (>1) — PDD recommends ≤ 1 (≤ 2 in transition).",
@@ -4072,7 +4131,9 @@ async fn run_main() -> Result<()> {
             } => {
                 // PDD A4: when --cycle is explicitly provided, --unit must also be provided
                 if cycle.is_some() && unit.is_none() {
-                    eprintln!("ERROR: --unit is required when --cycle is specified (PDD A4: every cycle belongs to exactly one unit)");
+                    eprintln!(
+                        "ERROR: --unit is required when --cycle is specified (PDD A4: every cycle belongs to exactly one unit)"
+                    );
                     std::process::exit(2);
                 }
                 let cwd = std::env::current_dir()
@@ -4248,7 +4309,12 @@ async fn run_main() -> Result<()> {
                 let qs = format!("?q={}&mode={}&limit={limit}", urlenc(&query), urlenc(&mode));
                 output(&client::get(&c, &format!("/tasks/search{qs}")).await?);
             }
-            TaskAction::Complete { id, evidence, comment, agent } => {
+            TaskAction::Complete {
+                id,
+                evidence,
+                comment,
+                agent,
+            } => {
                 task_transition(
                     &c,
                     &id,
@@ -4261,10 +4327,20 @@ async fn run_main() -> Result<()> {
                 .await?;
             }
             TaskAction::Cancel { id, reason, agent } => {
-                task_transition(&c, &id, "cancelled", reason.as_deref(), None, &agent, output).await?;
+                task_transition(
+                    &c,
+                    &id,
+                    "cancelled",
+                    reason.as_deref(),
+                    None,
+                    &agent,
+                    output,
+                )
+                .await?;
             }
             TaskAction::Block { id, reason, agent } => {
-                task_transition(&c, &id, "blocked", reason.as_deref(), None, &agent, output).await?;
+                task_transition(&c, &id, "blocked", reason.as_deref(), None, &agent, output)
+                    .await?;
             }
             TaskAction::Unblock { id, comment, agent } => {
                 task_transition(&c, &id, "todo", comment.as_deref(), None, &agent, output).await?;
@@ -4276,8 +4352,7 @@ async fn run_main() -> Result<()> {
                 dry_run,
                 accept,
             } => {
-                handle_decompose(&c, &id, max_depth, &strategy, dry_run, accept.as_deref())
-                    .await?;
+                handle_decompose(&c, &id, max_depth, &strategy, dry_run, accept.as_deref()).await?;
             }
             TaskAction::Tree {
                 id,
@@ -4406,12 +4481,7 @@ async fn run_main() -> Result<()> {
                 limit,
             } => {
                 let type_val = r#type;
-                let mut qs = format!(
-                    "?q={}&mode={}&limit={}",
-                    urlenc(&query),
-                    mode,
-                    limit
-                );
+                let mut qs = format!("?q={}&mode={}&limit={}", urlenc(&query), mode, limit);
                 if let Some(t) = &type_val {
                     qs.push_str(&format!("&type={}", urlenc(t)));
                 }
@@ -4423,9 +4493,17 @@ async fn run_main() -> Result<()> {
                 unit,
                 dry_run,
             } => {
-                output(&client::request(&c, "POST", "/knowledge/import", Some(json!({
-                    "cwd": cwd, "plan_id": plan, "unit_id": unit, "dry_run": dry_run,
-                }))).await?);
+                output(
+                    &client::request(
+                        &c,
+                        "POST",
+                        "/knowledge/import",
+                        Some(json!({
+                            "cwd": cwd, "plan_id": plan, "unit_id": unit, "dry_run": dry_run,
+                        })),
+                    )
+                    .await?,
+                );
             }
             ArtifactAction::Export { cwd, plan, unit } => {
                 output(
@@ -4483,7 +4561,14 @@ async fn run_main() -> Result<()> {
 
         // ===== Comment =====
         Command::Comment { action } => match action {
-            CommentAction::Create { body, task, unit, plan, author, label } => {
+            CommentAction::Create {
+                body,
+                task,
+                unit,
+                plan,
+                author,
+                label,
+            } => {
                 output(
                     &client::request(
                         &c,
@@ -4499,7 +4584,8 @@ async fn run_main() -> Result<()> {
                 );
             }
             CommentAction::List { task, unit, plan } => {
-                let qs = query_string(&[("task_id", &task), ("unit_id", &unit), ("plan_id", &plan)]);
+                let qs =
+                    query_string(&[("task_id", &task), ("unit_id", &unit), ("plan_id", &plan)]);
                 output(&client::get(&c, &format!("/comments{qs}")).await?);
             }
             CommentAction::Delete { id } => {
@@ -4594,7 +4680,12 @@ async fn run_main() -> Result<()> {
         }
 
         // ===== Watch (FIX-CLI-102) =====
-        Command::Watch { project, task, cycle, format: _fmt } => {
+        Command::Watch {
+            project,
+            task,
+            cycle,
+            format: _fmt,
+        } => {
             let qs = query_string(&[
                 ("project_id", &project),
                 ("task_id", &task),
@@ -4610,7 +4701,10 @@ async fn run_main() -> Result<()> {
         }
 
         // ===== Backup / Restore / Migrate (FIX-CLI-102) =====
-        Command::Backup { output: out_path, project } => {
+        Command::Backup {
+            output: out_path,
+            project,
+        } => {
             output(
                 &client::request(
                     &c,
@@ -4621,7 +4715,11 @@ async fn run_main() -> Result<()> {
                 .await?,
             );
         }
-        Command::Restore { input, merge, dry_run } => {
+        Command::Restore {
+            input,
+            merge,
+            dry_run,
+        } => {
             output(
                 &client::request(
                     &c,
@@ -4634,13 +4732,8 @@ async fn run_main() -> Result<()> {
         }
         Command::Migrate { dry_run } => {
             output(
-                &client::request(
-                    &c,
-                    "POST",
-                    "/migrate",
-                    Some(json!({ "dry_run": dry_run })),
-                )
-                .await?,
+                &client::request(&c, "POST", "/migrate", Some(json!({ "dry_run": dry_run })))
+                    .await?,
             );
         }
 
@@ -4688,7 +4781,11 @@ async fn run_main() -> Result<()> {
         }
 
         // ===== Knowledge shortcuts =====
-        Command::FindSimilar { query, limit, project } => {
+        Command::FindSimilar {
+            query,
+            limit,
+            project,
+        } => {
             let qs = format!(
                 "?q={}&limit={}{}",
                 urlenc(&query),
@@ -4709,8 +4806,7 @@ async fn run_main() -> Result<()> {
                 path.push_str(&format!("&project_id={}", urlenc(pid)));
             }
             let val = client::get(&c, &path).await?;
-            let mut arr: Vec<serde_json::Value> =
-                val.as_array().cloned().unwrap_or_default();
+            let mut arr: Vec<serde_json::Value> = val.as_array().cloned().unwrap_or_default();
             arr.sort_by(|a, b| {
                 let aa = a.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
                 let bb = b.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
@@ -4769,17 +4865,12 @@ async fn run_main() -> Result<()> {
             }
             // B. Dispatch metadata + TSV schema validation ----
             DiscoverAction::DispatchPlan { plan, batch_size } => {
-                let qs = format!(
-                    "?plan_id={}&batch_size={}",
-                    urlenc(&plan),
-                    batch_size
-                );
+                let qs = format!("?plan_id={}&batch_size={}", urlenc(&plan), batch_size);
                 output(&client::get(&c, &format!("/discover-loop/dispatch-plan{qs}")).await?);
             }
             DiscoverAction::VerifyTsv { path } => {
-                let tsv = std::fs::read_to_string(&path).map_err(|e| {
-                    anyhow::anyhow!("failed to read TSV file {:?}: {e}", path)
-                })?;
+                let tsv = std::fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("failed to read TSV file {:?}: {e}", path))?;
                 let result = client::request(
                     &c,
                     "POST",
@@ -4798,8 +4889,7 @@ async fn run_main() -> Result<()> {
                 }
             }
             DiscoverAction::BatchId => {
-                let result =
-                    client::request(&c, "POST", "/discover-loop/batch-id", None).await?;
+                let result = client::request(&c, "POST", "/discover-loop/batch-id", None).await?;
                 // Print just the batch_id string in quiet mode; full JSON otherwise.
                 if quiet {
                     if let Some(bid) = result.get("batch_id").and_then(|v| v.as_str()) {
@@ -4816,9 +4906,8 @@ async fn run_main() -> Result<()> {
                 cycle,
                 assignee,
             } => {
-                let tsv = std::fs::read_to_string(&path).map_err(|e| {
-                    anyhow::anyhow!("failed to read TSV file {:?}: {e}", path)
-                })?;
+                let tsv = std::fs::read_to_string(&path)
+                    .map_err(|e| anyhow::anyhow!("failed to read TSV file {:?}: {e}", path))?;
                 // R3 DOGFOOD-028 fix: auto-set CLAWKET_SYNC_CONTEXT for this
                 // CLI process so any hook check that fires for child processes
                 // spawned by the sync (or by the agent that invoked us during
@@ -4859,9 +4948,7 @@ async fn run_main() -> Result<()> {
                     (_, Some(p)) => format!("?project_id={}", urlenc(p)),
                     _ => String::new(),
                 };
-                output(
-                    &client::get(&c, &format!("/discover-loop/status{qs}")).await?,
-                );
+                output(&client::get(&c, &format!("/discover-loop/status{qs}")).await?);
             }
             DiscoverAction::Converged { plan, project } => {
                 let qs = match (plan.as_deref(), project.as_deref()) {
@@ -4869,8 +4956,7 @@ async fn run_main() -> Result<()> {
                     (_, Some(p)) => format!("?project_id={}", urlenc(p)),
                     _ => String::new(),
                 };
-                let result =
-                    client::get(&c, &format!("/discover-loop/converged{qs}")).await?;
+                let result = client::get(&c, &format!("/discover-loop/converged{qs}")).await?;
                 let converged_val = result
                     .get("converged")
                     .and_then(|v| v.as_bool())
@@ -4883,11 +4969,8 @@ async fn run_main() -> Result<()> {
             }
             DiscoverAction::Rounds { project } => {
                 output(
-                    &client::get(
-                        &c,
-                        &format!("/discover-loop/rounds/{}", urlenc(&project)),
-                    )
-                    .await?,
+                    &client::get(&c, &format!("/discover-loop/rounds/{}", urlenc(&project)))
+                        .await?,
                 );
             }
         },
@@ -4917,9 +5000,8 @@ async fn handle_decompose(
     accept: Option<&str>,
 ) -> Result<()> {
     use commands::task::decompose::{
-        apply_accept, apply_size_cap, build_suggestions, check_atomic_size_hint,
+        AtomicGate, apply_accept, apply_size_cap, build_suggestions, check_atomic_size_hint,
         check_policy_violations, extract_success_criteria, is_manual_policy, parse_accept,
-        AtomicGate,
     };
 
     let task = client::get(c, &format!("/tasks/{task_id}")).await?;
@@ -4928,7 +5010,10 @@ async fn handle_decompose(
         .and_then(|v| v.as_str())
         .unwrap_or("(untitled)")
         .to_string();
-    let parent_unit_id = task.get("unit_id").and_then(|v| v.as_str()).map(String::from);
+    let parent_unit_id = task
+        .get("unit_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     // LM-265 / L1.3.c — read the strict-format size hint and policy from
     // the task row (mirrored from the envelope at import time, see
     // LM-263). Both columns have SQLite DEFAULTs (`small`/`auto`) so
@@ -4974,9 +5059,7 @@ async fn handle_decompose(
         .cloned()
         .or_else(|| env_resp.get("raw_envelope").cloned())
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "task {task_id} has no envelope — `clawket task envelope set` first"
-            )
+            anyhow::anyhow!("task {task_id} has no envelope — `clawket task envelope set` first")
         })?;
 
     let criteria = extract_success_criteria(&envelope);
@@ -5064,8 +5147,13 @@ async fn handle_decompose(
         if let Some(ref u) = parent_unit_id {
             payload.insert("unit_id".into(), json!(u));
         }
-        let resp =
-            client::request(c, "POST", "/tasks", Some(serde_json::Value::Object(payload))).await?;
+        let resp = client::request(
+            c,
+            "POST",
+            "/tasks",
+            Some(serde_json::Value::Object(payload)),
+        )
+        .await?;
         created.push(json!({
             "id": resp.get("id").cloned().unwrap_or(json!(null)),
             "ticket": resp.get("ticket").cloned().unwrap_or(json!(null)),
@@ -5096,9 +5184,7 @@ async fn handle_tree(
     let include_env = if envelope_summary { "true" } else { "false" };
     let raw = client::get(
         c,
-        &format!(
-            "/tasks/{task_id}/subtree?depth={depth}&order=dfs&include_envelope={include_env}"
-        ),
+        &format!("/tasks/{task_id}/subtree?depth={depth}&order=dfs&include_envelope={include_env}"),
     )
     .await?;
 
@@ -5127,11 +5213,12 @@ async fn handle_plan_export(
     out_path: Option<&str>,
     include_knowledge: bool,
 ) -> Result<()> {
-    use commands::plan::export::{PlanBundle, TaskBundle, UnitBundle, render_json, render_markdown};
+    use commands::plan::export::{
+        PlanBundle, TaskBundle, UnitBundle, render_json, render_markdown,
+    };
 
     let plan = client::get(c, &format!("/plans/{plan_id}")).await?;
-    let units_raw =
-        client::get(c, &format!("/units?plan_id={plan_id}")).await?;
+    let units_raw = client::get(c, &format!("/units?plan_id={plan_id}")).await?;
     let units_arr = units_raw.as_array().cloned().unwrap_or_default();
 
     let mut units: Vec<UnitBundle> = Vec::with_capacity(units_arr.len());
@@ -5148,19 +5235,15 @@ async fn handle_plan_export(
                 Some(s) => s.to_string(),
                 None => continue,
             };
-            let envelope = match client::get(
-                c,
-                &format!("/tasks/{task_id}/envelope?resolve=true"),
-            )
-            .await
-            {
-                Ok(resp) => resp
-                    .get("resolved_envelope")
-                    .cloned()
-                    .or_else(|| resp.get("raw_envelope").cloned())
-                    .unwrap_or(serde_json::Value::Null),
-                Err(_) => serde_json::Value::Null,
-            };
+            let envelope =
+                match client::get(c, &format!("/tasks/{task_id}/envelope?resolve=true")).await {
+                    Ok(resp) => resp
+                        .get("resolved_envelope")
+                        .cloned()
+                        .or_else(|| resp.get("raw_envelope").cloned())
+                        .unwrap_or(serde_json::Value::Null),
+                    Err(_) => serde_json::Value::Null,
+                };
             tasks.push(TaskBundle { task, envelope });
         }
         units.push(UnitBundle { unit, tasks });
@@ -5296,8 +5379,8 @@ async fn emit_drift_banner(c: &client::HttpClient, task_id: &str) {
         Ok(v) => v,
         Err(_) => return,
     };
-    let color = std::env::var("NO_COLOR").is_err()
-        && std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let color =
+        std::env::var("NO_COLOR").is_err() && std::io::IsTerminal::is_terminal(&std::io::stderr());
     if let Some(banner) = commands::execute::drift_warning::format(&drift, color) {
         eprintln!("{banner}");
     }

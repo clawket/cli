@@ -50,7 +50,11 @@ pub fn legacy_remnants_present<F: Fn(&Path) -> bool>(
     candidates: &[PathBuf],
     exists_fn: F,
 ) -> Vec<PathBuf> {
-    candidates.iter().filter(|p| exists_fn(p)).cloned().collect()
+    candidates
+        .iter()
+        .filter(|p| exists_fn(p))
+        .cloned()
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,12 +120,20 @@ pub fn classify_db_freshness(
     now: SystemTime,
     has_backup: bool,
 ) -> Severity {
-    let Some(m) = db_mtime else { return Severity::Ok };
-    let Ok(age) = now.duration_since(m) else { return Severity::Ok };
+    let Some(m) = db_mtime else {
+        return Severity::Ok;
+    };
+    let Ok(age) = now.duration_since(m) else {
+        return Severity::Ok;
+    };
     if age.as_secs() > 24 * 60 * 60 {
         return Severity::Ok;
     }
-    if has_backup { Severity::Ok } else { Severity::Info }
+    if has_backup {
+        Severity::Ok
+    } else {
+        Severity::Info
+    }
 }
 
 #[cfg(test)]
@@ -183,21 +195,30 @@ mod tests {
     fn db_freshness_well_aged_is_ok() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 24 * 3600);
         let two_days_ago = SystemTime::UNIX_EPOCH + Duration::from_secs(8 * 24 * 3600);
-        assert_eq!(classify_db_freshness(Some(two_days_ago), now, false), Severity::Ok);
+        assert_eq!(
+            classify_db_freshness(Some(two_days_ago), now, false),
+            Severity::Ok
+        );
     }
 
     #[test]
     fn db_freshness_recent_no_backup_is_info() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 24 * 3600);
         let one_hour_ago = now - Duration::from_secs(3600);
-        assert_eq!(classify_db_freshness(Some(one_hour_ago), now, false), Severity::Info);
+        assert_eq!(
+            classify_db_freshness(Some(one_hour_ago), now, false),
+            Severity::Info
+        );
     }
 
     #[test]
     fn db_freshness_recent_with_backup_is_ok() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 24 * 3600);
         let one_hour_ago = now - Duration::from_secs(3600);
-        assert_eq!(classify_db_freshness(Some(one_hour_ago), now, true), Severity::Ok);
+        assert_eq!(
+            classify_db_freshness(Some(one_hour_ago), now, true),
+            Severity::Ok
+        );
     }
 
     #[test]
@@ -211,7 +232,10 @@ mod tests {
         // Clock skew (mtime > now) shouldn't crash or false-alarm.
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 24 * 3600);
         let future = now + Duration::from_secs(3600);
-        assert_eq!(classify_db_freshness(Some(future), now, false), Severity::Ok);
+        assert_eq!(
+            classify_db_freshness(Some(future), now, false),
+            Severity::Ok
+        );
     }
 
     #[test]

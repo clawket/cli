@@ -49,7 +49,11 @@ fn fixture_is_well_formed() {
         .join(".claude")
         .join("hooks")
         .join("session-start.cjs");
-    assert!(hook.exists(), "missing session-start.cjs fixture: {:?}", hook);
+    assert!(
+        hook.exists(),
+        "missing session-start.cjs fixture: {:?}",
+        hook
+    );
     let body = std::fs::read_to_string(&hook).unwrap();
     assert!(
         body.contains("hookSpecificOutput"),

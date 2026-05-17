@@ -18,8 +18,8 @@ use std::time::SystemTime;
 
 use crate::client;
 use crate::doctor_checks::{
-    classify_activity_log_budget, classify_db_freshness, classify_task_count_change,
-    is_world_writable, legacy_remnants_present, DoctorSnapshot, Severity,
+    DoctorSnapshot, Severity, classify_activity_log_budget, classify_db_freshness,
+    classify_task_count_change, is_world_writable, legacy_remnants_present,
 };
 use crate::paths;
 
@@ -239,27 +239,15 @@ pub async fn run(json_output: bool, plan: Option<String>, escalation: bool) -> R
             overlap_count += 1;
             tally.push(Severity::Error);
         } else {
-            println!(
-                "  {} {label}: {} — OK",
-                Severity::Ok.tag(),
-                p.display()
-            );
+            println!("  {} {label}: {} — OK", Severity::Ok.tag(), p.display());
         }
     }
     if overlap_count > 0 {
         eprintln!();
-        eprintln!(
-            "ERROR: {overlap_count} path(s) resolve under Claude Code's plugin directory."
-        );
-        eprintln!(
-            "       Plugin reinstall (`/plugin install`) wipes that tree, so this layout"
-        );
-        eprintln!(
-            "       will silently destroy the Clawket SQLite DB on the next plugin update."
-        );
-        eprintln!(
-            "       Fix: point CLAWKET_DATA_DIR / XDG_DATA_HOME / etc at a path outside"
-        );
+        eprintln!("ERROR: {overlap_count} path(s) resolve under Claude Code's plugin directory.");
+        eprintln!("       Plugin reinstall (`/plugin install`) wipes that tree, so this layout");
+        eprintln!("       will silently destroy the Clawket SQLite DB on the next plugin update.");
+        eprintln!("       Fix: point CLAWKET_DATA_DIR / XDG_DATA_HOME / etc at a path outside");
         eprintln!(
             "       ~/.claude/plugins/ . CLAWKET_ALLOW_PLUGIN_OVERLAP=1 acknowledges the risk."
         );
@@ -361,7 +349,10 @@ fn run_data_loss_diagnostics(
         println!("       조치: CLAWKET_DATA_DIR/XDG_DATA_HOME 를 plugin 디렉토리 외부로 이동");
         tally.push(Severity::Error);
     } else {
-        println!("  {} #1 plugin overlap: data dir 가 plugin 트리 외부에 있음", Severity::Ok.tag());
+        println!(
+            "  {} #1 plugin overlap: data dir 가 plugin 트리 외부에 있음",
+            Severity::Ok.tag()
+        );
         tally.push(Severity::Ok);
     }
 
@@ -383,7 +374,10 @@ fn run_data_loss_diagnostics(
             tally.push(Severity::Ok);
         }
         Err(reason) => {
-            println!("  {} #2 permissions: 검사 불가 ({reason})", Severity::Info.tag());
+            println!(
+                "  {} #2 permissions: 검사 불가 ({reason})",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
         }
     }
@@ -392,7 +386,10 @@ fn run_data_loss_diagnostics(
     let candidates = legacy_remnant_candidates();
     let found = legacy_remnants_present(&candidates, |p| p.exists());
     if found.is_empty() {
-        println!("  {} #3 legacy remnants: v10 이전 경로 잔재 없음", Severity::Ok.tag());
+        println!(
+            "  {} #3 legacy remnants: v10 이전 경로 잔재 없음",
+            Severity::Ok.tag()
+        );
         tally.push(Severity::Ok);
     } else {
         println!(
@@ -403,7 +400,9 @@ fn run_data_loss_diagnostics(
         for p in &found {
             println!("       - {}", p.display());
         }
-        println!("       조치: 데이터를 더 이상 쓰지 않는다면 위 경로를 사용자가 직접 삭제. Clawket 은 자동 마이그레이션을 지원하지 않음.");
+        println!(
+            "       조치: 데이터를 더 이상 쓰지 않는다면 위 경로를 사용자가 직접 삭제. Clawket 은 자동 마이그레이션을 지원하지 않음."
+        );
         tally.push(Severity::Warn);
     }
 
@@ -422,7 +421,9 @@ fn run_data_loss_diagnostics(
                         prev_count.unwrap_or(0),
                         curr
                     );
-                    println!("       조치: clawket task list 로 작업 수 확인, 누락된 항목이 의도된 cancel 인지 검증");
+                    println!(
+                        "       조치: clawket task list 로 작업 수 확인, 누락된 항목이 의도된 cancel 인지 검증"
+                    );
                 }
                 Severity::Info => {
                     println!(
@@ -477,14 +478,20 @@ fn run_data_loss_diagnostics(
                 "  {} #5 db freshness: db.sqlite 가 24h 이내 신규 + 백업 없음 — 첫 설치 또는 재생성 직후",
                 Severity::Info.tag()
             );
-            println!("       조치: 첫 설치 직후라면 정상. 의도치 않은 재생성이라면 즉시 작업 중단 후 검사.");
+            println!(
+                "       조치: 첫 설치 직후라면 정상. 의도치 않은 재생성이라면 즉시 작업 중단 후 검사."
+            );
             tally.push(Severity::Info);
         }
         (Some(_), s) => {
             println!(
                 "  {} #5 db freshness: db.sqlite OK ({})",
                 Severity::Ok.tag(),
-                if backup { "백업 존재" } else { "24h 이상 경과" }
+                if backup {
+                    "백업 존재"
+                } else {
+                    "24h 이상 경과"
+                }
             );
             tally.push(s);
         }
@@ -495,7 +502,10 @@ async fn run_activity_log_budget_check(client: &client::HttpClient, tally: &mut 
     let stats = match client::get(client, "/activity/stats").await {
         Ok(v) => v,
         Err(e) => {
-            println!("  {} 데몬 비가용 — activity_log 사이즈 검사 생략 ({e})", Severity::Info.tag());
+            println!(
+                "  {} 데몬 비가용 — activity_log 사이즈 검사 생략 ({e})",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
             return;
         }
@@ -504,7 +514,10 @@ async fn run_activity_log_budget_check(client: &client::HttpClient, tally: &mut 
     let used = stats.get("used_bytes").and_then(Value::as_i64).unwrap_or(0);
     let max = stats.get("max_bytes").and_then(Value::as_i64).unwrap_or(0);
     let hot_rows = stats.get("hot_rows").and_then(Value::as_i64).unwrap_or(0);
-    let archive_batches = stats.get("archive_batches").and_then(Value::as_i64).unwrap_or(0);
+    let archive_batches = stats
+        .get("archive_batches")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let max_mb = stats.get("max_mb").and_then(Value::as_i64).unwrap_or(0);
     let hot_days = stats.get("hot_days").and_then(Value::as_i64).unwrap_or(0);
     let total_days = stats.get("total_days").and_then(Value::as_i64).unwrap_or(0);
@@ -596,13 +609,24 @@ fn write_snapshot(p: &Path, s: &DoctorSnapshot) -> std::result::Result<(), std::
 }
 
 fn db_mtime_secs(data_dir: &Path) -> Option<u64> {
-    let m = data_dir.join("db.sqlite").metadata().ok()?.modified().ok()?;
-    m.duration_since(SystemTime::UNIX_EPOCH).ok().map(|d| d.as_secs())
+    let m = data_dir
+        .join("db.sqlite")
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()?;
+    m.duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 fn nearby_backup_present(db_path: &Path) -> bool {
-    let Some(parent) = db_path.parent() else { return false };
-    let Ok(entries) = fs::read_dir(parent) else { return false };
+    let Some(parent) = db_path.parent() else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(parent) else {
+        return false;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let s = name.to_string_lossy();
@@ -802,10 +826,7 @@ fn run_hooks_check(tally: &mut Vec<Severity>) {
             .as_ref()
             .and_then(|m| extract_handler_for_event(m, event))
             .unwrap_or_else(|| "—".to_string());
-        let ts = last_fired
-            .get(event)
-            .map(|s| s.as_str())
-            .unwrap_or("—");
+        let ts = last_fired.get(event).map(|s| s.as_str()).unwrap_or("—");
         println!("    - {event:<18} handler={handler}  last_fired={ts}");
     }
 }
@@ -1090,7 +1111,10 @@ async fn run_audit_log_check(client: &client::HttpClient, tally: &mut Vec<Severi
     };
 
     let total = entries.len();
-    println!("  {} audit_log: recent {total} entries fetched", Severity::Ok.tag());
+    println!(
+        "  {} audit_log: recent {total} entries fetched",
+        Severity::Ok.tag()
+    );
     if let Some(first) = entries.first() {
         if let Some(at) = first.get("at").and_then(Value::as_str) {
             println!("  last entry at: {at}");
@@ -1115,19 +1139,22 @@ async fn run_audit_log_check(client: &client::HttpClient, tally: &mut Vec<Severi
             }
             _ => {
                 chain_ok = false;
-                broken_at = newer
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
+                broken_at = newer.get("id").and_then(Value::as_str).map(str::to_string);
                 break;
             }
         }
     }
     if entries.len() < 2 {
-        println!("  {} chain integrity: not enough entries to verify", Severity::Info.tag());
+        println!(
+            "  {} chain integrity: not enough entries to verify",
+            Severity::Info.tag()
+        );
         tally.push(Severity::Info);
     } else if chain_ok {
-        println!("  {} chain integrity: OK over recent {total} entries", Severity::Ok.tag());
+        println!(
+            "  {} chain integrity: OK over recent {total} entries",
+            Severity::Ok.tag()
+        );
         tally.push(Severity::Ok);
     } else {
         println!(
@@ -1157,12 +1184,18 @@ async fn run_tier_distribution_check(
     let tasks = match client::get(client, &path).await {
         Ok(Value::Array(items)) => items,
         Ok(_) => {
-            println!("  {} daemon returned unexpected shape for /tasks", Severity::Info.tag());
+            println!(
+                "  {} daemon returned unexpected shape for /tasks",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
             return;
         }
         Err(e) => {
-            println!("  {} daemon unavailable — tier_distribution skipped ({e})", Severity::Info.tag());
+            println!(
+                "  {} daemon unavailable — tier_distribution skipped ({e})",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
             return;
         }
@@ -1210,7 +1243,10 @@ async fn run_escalation_rate_check(
     let tasks = match client::get(client, &path).await {
         Ok(Value::Array(items)) => items,
         Ok(_) | Err(_) => {
-            println!("  {} daemon unavailable — escalation_rate skipped", Severity::Info.tag());
+            println!(
+                "  {} daemon unavailable — escalation_rate skipped",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
             return;
         }
@@ -1228,10 +1264,7 @@ async fn run_escalation_rate_check(
     let escalated = tasks
         .iter()
         .filter(|t| {
-            let tier = t
-                .get("tier")
-                .and_then(Value::as_str)
-                .unwrap_or("none");
+            let tier = t.get("tier").and_then(Value::as_str).unwrap_or("none");
             !g1_tiers.contains(&tier)
         })
         .count();
@@ -1270,14 +1303,20 @@ async fn run_escalation_report(
     let tasks = match client::get(client, &path).await {
         Ok(Value::Array(items)) => items,
         Ok(_) | Err(_) => {
-            println!("  {} daemon unavailable — escalation report skipped", Severity::Info.tag());
+            println!(
+                "  {} daemon unavailable — escalation report skipped",
+                Severity::Info.tag()
+            );
             tally.push(Severity::Info);
             return;
         }
     };
 
     if tasks.is_empty() {
-        println!("  {} no tasks — escalation report N/A", Severity::Info.tag());
+        println!(
+            "  {} no tasks — escalation report N/A",
+            Severity::Info.tag()
+        );
         tally.push(Severity::Info);
         return;
     }
@@ -1318,9 +1357,7 @@ async fn run_escalation_report(
         } else {
             0.0
         };
-        println!(
-            "      {tier}: {escalated_in_tier} / {total_in_tier} ({pct:.0}%)"
-        );
+        println!("      {tier}: {escalated_in_tier} / {total_in_tier} ({pct:.0}%)");
     }
     tally.push(Severity::Ok);
 }
@@ -1374,7 +1411,9 @@ fn run_tier_aware_check(tally: &mut Vec<Severity>) {
 fn run_plugin_install_check(tally: &mut Vec<Severity>) {
     // Check if the clawket binary itself is reachable (already installed).
     let bin_candidates = [
-        std::env::var("CLAWKET_BIN").ok().map(std::path::PathBuf::from),
+        std::env::var("CLAWKET_BIN")
+            .ok()
+            .map(std::path::PathBuf::from),
         {
             // Plugin layout: ~/.claude/plugins/<clawket-version>/bin/clawket
             let home = std::env::var("HOME").map(std::path::PathBuf::from).ok();
@@ -1388,7 +1427,10 @@ fn run_plugin_install_check(tally: &mut Vec<Severity>) {
         println!("  {} clawket binary: {}", Severity::Ok.tag(), p.display());
         tally.push(Severity::Ok);
     } else {
-        println!("  {} cannot resolve current executable path", Severity::Warn.tag());
+        println!(
+            "  {} cannot resolve current executable path",
+            Severity::Warn.tag()
+        );
         tally.push(Severity::Warn);
     }
 
@@ -1403,11 +1445,7 @@ fn run_plugin_install_check(tally: &mut Vec<Severity>) {
                 .into_iter()
                 .flatten()
                 .flatten()
-                .filter(|e| {
-                    e.file_name()
-                        .to_string_lossy()
-                        .starts_with("clawket")
-                })
+                .filter(|e| e.file_name().to_string_lossy().starts_with("clawket"))
                 .collect();
             if found.is_empty() {
                 println!(
@@ -1580,7 +1618,10 @@ fn run_i18n_check(tally: &mut Vec<Severity>) {
     for (lang, count) in &counts {
         match (count, baseline) {
             (Some(n), Some(base)) if *n == base => {
-                println!("  {} {lang}.json: {n} keys (0% missing vs en={base})", Severity::Ok.tag());
+                println!(
+                    "  {} {lang}.json: {n} keys (0% missing vs en={base})",
+                    Severity::Ok.tag()
+                );
             }
             (Some(n), Some(base)) => {
                 let missing_pct = if base > 0 {
@@ -1601,10 +1642,16 @@ fn run_i18n_check(tally: &mut Vec<Severity>) {
                 tally.push(Severity::Warn);
             }
             (Some(n), None) => {
-                println!("  {} {lang}.json: {n} keys (no en baseline)", Severity::Ok.tag());
+                println!(
+                    "  {} {lang}.json: {n} keys (no en baseline)",
+                    Severity::Ok.tag()
+                );
             }
             (None, _) => {
-                println!("  {} {lang}.json: missing or unreadable", Severity::Warn.tag());
+                println!(
+                    "  {} {lang}.json: missing or unreadable",
+                    Severity::Warn.tag()
+                );
                 tally.push(Severity::Warn);
             }
         }
@@ -1631,7 +1678,10 @@ fn run_skills_check(tally: &mut Vec<Severity>) {
     let home = match std::env::var("HOME").map(std::path::PathBuf::from) {
         Ok(h) => h,
         Err(_) => {
-            println!("  {} HOME not set — cannot locate skills dir", Severity::Warn.tag());
+            println!(
+                "  {} HOME not set — cannot locate skills dir",
+                Severity::Warn.tag()
+            );
             tally.push(Severity::Warn);
             return;
         }
@@ -1642,7 +1692,11 @@ fn run_skills_check(tally: &mut Vec<Severity>) {
     let skill_file = clawket_skill.join("SKILL.md");
 
     if skill_file.exists() {
-        println!("  {} clawket skill: {}", Severity::Ok.tag(), skill_file.display());
+        println!(
+            "  {} clawket skill: {}",
+            Severity::Ok.tag(),
+            skill_file.display()
+        );
         // SKILL-190: frontmatter row.
         let (name_ok, desc_ok) = read_skill_frontmatter(&skill_file);
         let row = format_skill_frontmatter_row("clawket", name_ok, desc_ok);
@@ -1767,7 +1821,11 @@ async fn run_json() -> Result<()> {
     let client = client::make_client();
     match client::get(&client, "/health").await {
         Ok(val) => {
-            check!("daemon", "ok", serde_json::to_string(&val).unwrap_or_default());
+            check!(
+                "daemon",
+                "ok",
+                serde_json::to_string(&val).unwrap_or_default()
+            );
         }
         Err(e) => {
             check!("daemon", "error", format!("daemon unreachable: {e}"));
@@ -1778,9 +1836,17 @@ async fn run_json() -> Result<()> {
     let data = paths::data_dir();
     let overlap = paths::path_overlaps_plugin_dir(&data);
     if overlap {
-        check!("path_separation", "error", format!("data dir {} overlaps plugin dir", data.display()));
+        check!(
+            "path_separation",
+            "error",
+            format!("data dir {} overlaps plugin dir", data.display())
+        );
     } else {
-        check!("path_separation", "ok", format!("data dir {} is safe", data.display()));
+        check!(
+            "path_separation",
+            "ok",
+            format!("data dir {} is safe", data.display())
+        );
     }
 
     // schema_version / components.json check
@@ -1822,16 +1888,30 @@ async fn check_schema_version(client: &client::HttpClient) -> (String, String) {
     match pinned {
         Some(ref pinned_ver) => {
             if &daemon_schema == pinned_ver {
-                ("ok".to_string(), format!("schema_version={daemon_schema} matches components.json pin"))
+                (
+                    "ok".to_string(),
+                    format!("schema_version={daemon_schema} matches components.json pin"),
+                )
             } else if daemon_schema == "unknown" {
-                ("warn".to_string(), format!("daemon did not report schema_version; components.json pins {pinned_ver}"))
+                (
+                    "warn".to_string(),
+                    format!(
+                        "daemon did not report schema_version; components.json pins {pinned_ver}"
+                    ),
+                )
             } else {
-                ("error".to_string(), format!("schema_version mismatch: daemon={daemon_schema} components.json={pinned_ver}"))
+                (
+                    "error".to_string(),
+                    format!(
+                        "schema_version mismatch: daemon={daemon_schema} components.json={pinned_ver}"
+                    ),
+                )
             }
         }
-        None => {
-            ("info".to_string(), format!("components.json not found; daemon schema_version={daemon_schema}"))
-        }
+        None => (
+            "info".to_string(),
+            format!("components.json not found; daemon schema_version={daemon_schema}"),
+        ),
     }
 }
 
@@ -1841,7 +1921,12 @@ fn read_components_json_schema_version() -> Option<String> {
         let mut v = Vec::new();
         if let Ok(home) = std::env::var("HOME") {
             // Plugin installs components.json alongside the plugin manifest
-            v.push(std::path::PathBuf::from(&home).join(".claude/plugins").join("clawket").join("components.json"));
+            v.push(
+                std::path::PathBuf::from(&home)
+                    .join(".claude/plugins")
+                    .join("clawket")
+                    .join("components.json"),
+            );
         }
         if let Ok(cwd) = std::env::current_dir() {
             v.push(cwd.join("components.json"));
@@ -1873,15 +1958,23 @@ async fn check_sqlite_vec(client: &client::HttpClient) -> (String, String) {
         .get("sqlite_vec_version")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let vec_ok = health
-        .get("sqlite_vec")
-        .and_then(|v| v.as_bool());
+    let vec_ok = health.get("sqlite_vec").and_then(|v| v.as_bool());
 
     match (vec_ver, vec_ok) {
         (Some(ver), _) => ("ok".to_string(), format!("sqlite-vec loaded: {ver}")),
-        (None, Some(true)) => ("ok".to_string(), "sqlite-vec loaded (version unknown)".to_string()),
-        (None, Some(false)) => ("error".to_string(), "sqlite-vec NOT loaded — semantic search unavailable".to_string()),
-        (None, None) => ("warn".to_string(), "daemon did not report sqlite-vec status; semantic search may be unavailable".to_string()),
+        (None, Some(true)) => (
+            "ok".to_string(),
+            "sqlite-vec loaded (version unknown)".to_string(),
+        ),
+        (None, Some(false)) => (
+            "error".to_string(),
+            "sqlite-vec NOT loaded — semantic search unavailable".to_string(),
+        ),
+        (None, None) => (
+            "warn".to_string(),
+            "daemon did not report sqlite-vec status; semantic search may be unavailable"
+                .to_string(),
+        ),
     }
 }
 
@@ -2037,7 +2130,11 @@ pub mod project_enabled {
                 Severity::Warn,
                 "disabled must be Warn (not Error) — exit code stays 0"
             );
-            assert!(line.head.contains("disabled"), "head must say disabled: {}", line.head);
+            assert!(
+                line.head.contains("disabled"),
+                "head must say disabled: {}",
+                line.head
+            );
             assert!(
                 line.hints
                     .iter()

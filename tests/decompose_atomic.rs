@@ -252,11 +252,23 @@ async fn decompose_atomic_small_refuses() {
     let d = Daemon::spawn(&bin).await;
     let c = reqwest::Client::new();
     let (unit, cycle) = seed_unit(&c, &d.base, "decomp-small").await;
-    let id = make_task(&c, &d.base, &unit, &cycle, "Atomic task", "small", "auto", 5).await;
+    let id = make_task(
+        &c,
+        &d.base,
+        &unit,
+        &cycle,
+        "Atomic task",
+        "small",
+        "auto",
+        5,
+    )
+    .await;
 
-    let (ok, stdout, stderr) =
-        run_cli_capture(&d, &["task", "decompose", &id, "--max-depth", "2"]);
-    assert!(!ok, "atomic gate must exit non-zero. stdout={stdout} stderr={stderr}");
+    let (ok, stdout, stderr) = run_cli_capture(&d, &["task", "decompose", &id, "--max-depth", "2"]);
+    assert!(
+        !ok,
+        "atomic gate must exit non-zero. stdout={stdout} stderr={stderr}"
+    );
     assert!(
         stdout.contains("already_atomic"),
         "stdout must surface error code `already_atomic`:\n{stdout}"
@@ -280,11 +292,24 @@ async fn decompose_atomic_medium_caps_suggestions_at_3() {
     let c = reqwest::Client::new();
     let (unit, cycle) = seed_unit(&c, &d.base, "decomp-medium").await;
     // 7 criteria — well over the medium cap of 3.
-    let id = make_task(&c, &d.base, &unit, &cycle, "Medium task", "medium", "auto", 7).await;
+    let id = make_task(
+        &c,
+        &d.base,
+        &unit,
+        &cycle,
+        "Medium task",
+        "medium",
+        "auto",
+        7,
+    )
+    .await;
 
     let (ok, stdout, _stderr) =
         run_cli_capture(&d, &["task", "decompose", &id, "--max-depth", "2"]);
-    assert!(ok, "medium decompose must succeed (preview only):\n{stdout}");
+    assert!(
+        ok,
+        "medium decompose must succeed (preview only):\n{stdout}"
+    );
     let preview: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("preview must be JSON");
     let suggestions = preview["suggestions"]
@@ -347,14 +372,35 @@ async fn decompose_atomic_manual_policy_forces_dry_run() {
     let (unit, cycle) = seed_unit(&c, &d.base, "decomp-manual").await;
     // medium so the atomic gate doesn't refuse first; manual policy is
     // what we're testing.
-    let id = make_task(&c, &d.base, &unit, &cycle, "Manual task", "medium", "manual", 3).await;
+    let id = make_task(
+        &c,
+        &d.base,
+        &unit,
+        &cycle,
+        "Manual task",
+        "medium",
+        "manual",
+        3,
+    )
+    .await;
 
     // Even with --accept ALL, manual policy must downgrade to dry-run.
     let (ok, stdout, stderr) = run_cli_capture(
         &d,
-        &["task", "decompose", &id, "--max-depth", "2", "--accept", "ALL"],
+        &[
+            "task",
+            "decompose",
+            &id,
+            "--max-depth",
+            "2",
+            "--accept",
+            "ALL",
+        ],
     );
-    assert!(ok, "manual decompose dry-run must succeed: {stdout}\n{stderr}");
+    assert!(
+        ok,
+        "manual decompose dry-run must succeed: {stdout}\n{stderr}"
+    );
     assert!(
         stderr.contains("manual") && stderr.contains("ignored"),
         "stderr must explain the dry-run downgrade:\n{stderr}"

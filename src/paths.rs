@@ -169,7 +169,7 @@ mod tests {
             "/Users/u/.cache/clawket",
             "/Users/u/.config/clawket",
             "/Users/u/.local/state/clawket",
-            "/Users/u/.claude-config/clawket",   // .claude prefix but not .claude/plugins
+            "/Users/u/.claude-config/clawket", // .claude prefix but not .claude/plugins
             "/Users/u/projects/plugins/clawket", // plugins but not .claude/plugins
         ] {
             assert!(

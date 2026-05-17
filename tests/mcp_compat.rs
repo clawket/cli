@@ -11,7 +11,7 @@
 //! socket that doesn't exist (`CLAWKET_SOCKET` → /tmp/nonexistent…),
 //! which lets us prove daemon-down failure modes are surfaced cleanly.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,9 +41,8 @@ impl McpProcess {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         // Path must NOT exist; we just need a sentinel that hyper-util's UDS
         // connector will fail to dial. std::env::temp_dir() is per-OS sane.
-        let dead_socket = std::env::temp_dir().join(format!(
-            "clawket-mcp-compat-{nonce}-{n}-nonexistent.sock"
-        ));
+        let dead_socket =
+            std::env::temp_dir().join(format!("clawket-mcp-compat-{nonce}-{n}-nonexistent.sock"));
         // Force every daemon call to fail fast so we can verify graceful errors
         // without needing a live daemon.
         let mut child = Command::new(bin)

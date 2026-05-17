@@ -309,11 +309,11 @@ fn normalize_for_compare(md: &str) -> String {
     // not ULIDs, so the body is `[a-z0-9-]+` rather than a fixed-length
     // base32 string. Other entity IDs (PLAN/UNIT/TASK/ENV/CYC) are 26-char
     // ULIDs but we use the same loose body pattern for uniformity.
-    let ulid_re = Regex::new(r"\b(PLAN|PROJ|UNIT|TASK|ENV|CYC)-[0-9A-Za-z][0-9A-Za-z-]{0,63}\b").unwrap();
+    let ulid_re =
+        Regex::new(r"\b(PLAN|PROJ|UNIT|TASK|ENV|CYC)-[0-9A-Za-z][0-9A-Za-z-]{0,63}\b").unwrap();
     let ticket_re = Regex::new(r"\b[A-Z][A-Z0-9]{0,7}-[0-9]+\b").unwrap();
     let epoch_re = Regex::new(r"\b1[0-9]{12}\b").unwrap();
-    let iso_re =
-        Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z").unwrap();
+    let iso_re = Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z").unwrap();
     let pass1 = ulid_re.replace_all(md, "<ULID>");
     // Ticket regex would also match `<ULID>` substrings if applied
     // first, so order matters. After ULID redaction, remaining
