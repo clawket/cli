@@ -49,6 +49,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Render the active-project work summary (active plan, units, cycles,
     /// in-progress tasks). Used by Claude Code's SessionStart hook to seed
@@ -2449,11 +2450,11 @@ mod commands {
                 let mut out = vec![true; n];
                 for i in 0..n {
                     let d = depths[i];
-                    for j in (i + 1)..n {
-                        if depths[j] < d {
+                    for &dj in depths.iter().skip(i + 1) {
+                        if dj < d {
                             break;
                         }
-                        if depths[j] == d {
+                        if dj == d {
                             out[i] = false;
                             break;
                         }
@@ -2503,10 +2504,8 @@ mod commands {
                         node.status,
                         truncate(&node.title, 80)
                     ));
-                    if envelope_summary {
-                        if let Some(ref intent) = node.intent {
-                            line.push_str(&format!("  · {}", truncate(intent, 80)));
-                        }
+                    if envelope_summary && let Some(ref intent) = node.intent {
+                        line.push_str(&format!("  · {}", truncate(intent, 80)));
                     }
                     out.push(line);
                     while last_at_depth.len() <= d {
@@ -2772,11 +2771,11 @@ mod commands {
                     .unwrap_or("(untitled)");
                 out.push_str(&format!("# {title}\n\n"));
 
-                if let Some(desc) = b.plan.get("description").and_then(|v| v.as_str()) {
-                    if !desc.is_empty() {
-                        out.push_str(desc.trim_end());
-                        out.push_str("\n\n");
-                    }
+                if let Some(desc) = b.plan.get("description").and_then(|v| v.as_str())
+                    && !desc.is_empty()
+                {
+                    out.push_str(desc.trim_end());
+                    out.push_str("\n\n");
                 }
 
                 push_meta_section(&mut out, &b.plan);
@@ -2859,10 +2858,10 @@ mod commands {
                 let idx = ub.unit.get("idx").and_then(|v| v.as_i64()).unwrap_or(0);
                 let title = ub.unit.get("title").and_then(|v| v.as_str()).unwrap_or("?");
                 out.push_str(&format!("## Unit {idx}: {title}\n\n"));
-                if let Some(goal) = ub.unit.get("goal").and_then(|v| v.as_str()) {
-                    if !goal.is_empty() {
-                        out.push_str(&format!("**Goal**: {goal}\n\n"));
-                    }
+                if let Some(goal) = ub.unit.get("goal").and_then(|v| v.as_str())
+                    && !goal.is_empty()
+                {
+                    out.push_str(&format!("**Goal**: {goal}\n\n"));
                 }
                 for tb in &ub.tasks {
                     push_task_section(out, tb);
@@ -2883,11 +2882,11 @@ mod commands {
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 out.push_str(&format!("### {title}{ticket} — _{status}_\n\n"));
-                if let Some(body) = tb.task.get("body").and_then(|v| v.as_str()) {
-                    if !body.is_empty() {
-                        out.push_str(body.trim_end());
-                        out.push_str("\n\n");
-                    }
+                if let Some(body) = tb.task.get("body").and_then(|v| v.as_str())
+                    && !body.is_empty()
+                {
+                    out.push_str(body.trim_end());
+                    out.push_str("\n\n");
                 }
                 if !tb.envelope.is_null() {
                     out.push_str("**Envelope:**\n\n");
@@ -5356,6 +5355,21 @@ fn project_enabled_body(enabled: i64) -> serde_json::Value {
     serde_json::json!({"enabled": enabled})
 }
 
+/// Best-effort drift banner for `task view`. Failures (no envelope,
+/// target_repo unregistered, git unavailable) are silent — the surrounding
+/// command must still succeed even if drift cannot be computed.
+async fn emit_drift_banner(c: &client::HttpClient, task_id: &str) {
+    let drift = match client::get(c, &format!("/tasks/{task_id}/drift")).await {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let color =
+        std::env::var("NO_COLOR").is_err() && std::io::IsTerminal::is_terminal(&std::io::stderr());
+    if let Some(banner) = commands::execute::drift_warning::format(&drift, color) {
+        eprintln!("{banner}");
+    }
+}
+
 #[cfg(test)]
 mod project_enable_disable_tests {
     use super::project_enabled_body;
@@ -5369,20 +5383,5 @@ mod project_enable_disable_tests {
     #[test]
     fn enable_emits_enabled_one() {
         assert_eq!(project_enabled_body(1), json!({"enabled": 1}));
-    }
-}
-
-/// Best-effort drift banner for `task view`. Failures (no envelope,
-/// target_repo unregistered, git unavailable) are silent — the surrounding
-/// command must still succeed even if drift cannot be computed.
-async fn emit_drift_banner(c: &client::HttpClient, task_id: &str) {
-    let drift = match client::get(c, &format!("/tasks/{task_id}/drift")).await {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    let color =
-        std::env::var("NO_COLOR").is_err() && std::io::IsTerminal::is_terminal(&std::io::stderr());
-    if let Some(banner) = commands::execute::drift_warning::format(&drift, color) {
-        eprintln!("{banner}");
     }
 }

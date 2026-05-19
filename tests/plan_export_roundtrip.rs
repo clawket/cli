@@ -89,11 +89,11 @@ impl Daemon {
         let mut port: Option<u16> = None;
         for _ in 0..50 {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            if let Ok(s) = std::fs::read_to_string(&port_file) {
-                if let Ok(p) = s.trim().parse::<u16>() {
-                    port = Some(p);
-                    break;
-                }
+            if let Ok(s) = std::fs::read_to_string(&port_file)
+                && let Ok(p) = s.trim().parse::<u16>()
+            {
+                port = Some(p);
+                break;
             }
         }
         let port = port.expect("clawketd did not write its port file in time");

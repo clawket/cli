@@ -129,13 +129,11 @@ fn additional_context_lands_in_model_visible_context() {
     }
     let dir = fixture_dir();
     let settings = settings_path();
-    let probe = format!(
-        "Search your full context (system, additional context, hook output, \
+    let probe = "Search your full context (system, additional context, hook output, \
          everything) for any line that begins with '[hook-additional-context]'. \
          Reply with the exact 8-character token immediately after \
          'CLAWKET-LM147-' and NOTHING else. If you cannot find such a line, \
-         reply with the single word NOT_FOUND."
-    );
+         reply with the single word NOT_FOUND.";
     let out = Command::new("claude")
         .current_dir(&dir)
         .arg("-p")

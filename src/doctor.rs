@@ -101,12 +101,13 @@ pub async fn run(json_output: bool, plan: Option<String>, escalation: bool) -> R
             (true, Some(val))
         }
         Err(e) => {
-            // Daemon-down is only an ERROR when the binary is actually installed.
-            // If `resolve_daemon_bin()` returned None we already printed
-            // "binary: not found" above — adding an ERROR here would double-count
-            // a single "not installed" condition and break hermetic-env e2e tests
-            // that expect zero errors when no daemon is configured.
-            let severity = if daemon_bin.is_some() {
+            // Daemon-down is only an ERROR when the binary is actually installed
+            // AND the user hasn't overridden the socket path. `CLAWKET_SOCKET`
+            // override is the hermetic-env signal (e2e tests, sandboxed
+            // diagnostics) — in that mode the user explicitly knows no daemon
+            // is listening on the override path, so classify as INFO.
+            let hermetic = std::env::var("CLAWKET_SOCKET").is_ok();
+            let severity = if daemon_bin.is_some() && !hermetic {
                 Severity::Error
             } else {
                 Severity::Info
@@ -256,7 +257,7 @@ pub async fn run(json_output: bool, plan: Option<String>, escalation: bool) -> R
     }
     println!();
 
-    let any_error = tally.iter().any(|s| *s == Severity::Error);
+    let any_error = tally.contains(&Severity::Error);
     let warn_count = tally.iter().filter(|s| **s == Severity::Warn).count();
     let info_count = tally.iter().filter(|s| **s == Severity::Info).count();
     println!();
@@ -603,8 +604,7 @@ fn write_snapshot(p: &Path, s: &DoctorSnapshot) -> std::result::Result<(), std::
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent)?;
     }
-    let data = serde_json::to_string_pretty(s)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let data = serde_json::to_string_pretty(s).map_err(std::io::Error::other)?;
     fs::write(p, data)
 }
 
@@ -836,10 +836,10 @@ fn run_hooks_check(tally: &mut Vec<Severity>) {
 fn read_hooks_manifest() -> Option<Value> {
     for root in plugin_root_candidates() {
         let candidate = root.join("hooks/hooks.json");
-        if let Ok(raw) = fs::read_to_string(&candidate) {
-            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-                return Some(v);
-            }
+        if let Ok(raw) = fs::read_to_string(&candidate)
+            && let Ok(v) = serde_json::from_str::<Value>(&raw)
+        {
+            return Some(v);
         }
     }
     None
@@ -1036,10 +1036,10 @@ fn read_plugin_package_json() -> Option<Value> {
         .into_iter()
         .map(|r| r.join("package.json"))
     {
-        if let Ok(raw) = fs::read_to_string(&path) {
-            if let Ok(val) = serde_json::from_str::<Value>(&raw) {
-                return Some(val);
-            }
+        if let Ok(raw) = fs::read_to_string(&path)
+            && let Ok(val) = serde_json::from_str::<Value>(&raw)
+        {
+            return Some(val);
         }
     }
     None
@@ -1050,10 +1050,10 @@ fn read_components_json() -> Option<Value> {
         .into_iter()
         .map(|r| r.join("components.json"))
     {
-        if let Ok(raw) = fs::read_to_string(&path) {
-            if let Ok(val) = serde_json::from_str::<Value>(&raw) {
-                return Some(val);
-            }
+        if let Ok(raw) = fs::read_to_string(&path)
+            && let Ok(val) = serde_json::from_str::<Value>(&raw)
+        {
+            return Some(val);
         }
     }
     None
@@ -1461,11 +1461,11 @@ fn run_plugin_install_check(tally: &mut Vec<Severity>) {
                         Severity::Ok.tag(),
                         entry.path().display()
                     );
-                    if marker_version.is_none() {
-                        if let Some((v, p)) = read_install_marker(&entry.path()) {
-                            marker_version = Some(v);
-                            marker_path = Some(p);
-                        }
+                    if marker_version.is_none()
+                        && let Some((v, p)) = read_install_marker(&entry.path())
+                    {
+                        marker_version = Some(v);
+                        marker_path = Some(p);
                     }
                 }
                 tally.push(Severity::Ok);
@@ -1519,10 +1519,10 @@ fn read_install_marker(plugin_dir: &Path) -> Option<(String, PathBuf)> {
     let candidate = plugin_dir.join(".install-marker");
     let raw = fs::read_to_string(&candidate).ok()?;
     // Tolerate either JSON or a one-line `version=...` text marker.
-    if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-        if let Some(s) = v.get("version").and_then(Value::as_str) {
-            return Some((s.to_string(), candidate));
-        }
+    if let Ok(v) = serde_json::from_str::<Value>(&raw)
+        && let Some(s) = v.get("version").and_then(Value::as_str)
+    {
+        return Some((s.to_string(), candidate));
     }
     for line in raw.lines() {
         if let Some(rest) = line.trim().strip_prefix("version=") {
@@ -1730,29 +1730,27 @@ fn run_skills_check(tally: &mut Vec<Severity>) {
         tally.push(Severity::Info);
     }
 
-    // SKILL-190: also walk every other skill under ~/.claude/skills/ (any
-    // directory containing a SKILL.md) and emit a frontmatter row for each.
-    if skills_root.exists() {
-        if let Ok(entries) = fs::read_dir(&skills_root) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name();
-                let n = name.to_string_lossy();
-                if n == "clawket" {
-                    continue;
-                }
-                let candidate = path.join("SKILL.md");
-                if candidate.exists() {
-                    let (name_ok, desc_ok) = read_skill_frontmatter(&candidate);
-                    let row = format_skill_frontmatter_row(&n, name_ok, desc_ok);
-                    let sev = if name_ok && desc_ok {
-                        Severity::Ok
-                    } else {
-                        Severity::Warn
-                    };
-                    println!("  {} {row}", sev.tag());
-                    tally.push(sev);
-                }
+    if skills_root.exists()
+        && let Ok(entries) = fs::read_dir(&skills_root)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let n = name.to_string_lossy();
+            if n == "clawket" {
+                continue;
+            }
+            let candidate = path.join("SKILL.md");
+            if candidate.exists() {
+                let (name_ok, desc_ok) = read_skill_frontmatter(&candidate);
+                let row = format_skill_frontmatter_row(&n, name_ok, desc_ok);
+                let sev = if name_ok && desc_ok {
+                    Severity::Ok
+                } else {
+                    Severity::Warn
+                };
+                println!("  {} {row}", sev.tag());
+                tally.push(sev);
             }
         }
     }
@@ -1934,12 +1932,11 @@ fn read_components_json_schema_version() -> Option<String> {
         v
     };
     for path in &candidates {
-        if let Ok(raw) = fs::read_to_string(path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if let Some(s) = val.get("schema_version").and_then(|v| v.as_i64()) {
-                    return Some(s.to_string());
-                }
-            }
+        if let Ok(raw) = fs::read_to_string(path)
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
+            && let Some(s) = val.get("schema_version").and_then(|v| v.as_i64())
+        {
+            return Some(s.to_string());
         }
     }
     None

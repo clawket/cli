@@ -85,9 +85,9 @@ pub fn classify_task_count_change(prev: Option<u64>, current: u64) -> Severity {
 ///
 /// - `< 80%`         → Ok (steady state)
 /// - `80% .. < 95%`  → Warn (consider lowering CLAWKET_ACTIVITY_LOG_TOTAL_DAYS
-///                    or raising CLAWKET_ACTIVITY_LOG_MAX_MB)
+///   or raising CLAWKET_ACTIVITY_LOG_MAX_MB)
 /// - `>= 95%`        → Error (rollup is about to start shrinking the cold
-///                    cutoff aggressively, history will narrow)
+///   cutoff aggressively, history will narrow)
 ///
 /// `max_bytes == 0` is treated as "no budget configured" → Info; the daemon
 /// itself will still enforce its policy floor (MIN_TOTAL_DAYS_UNDER_PRESSURE)

@@ -62,6 +62,7 @@ pub fn ensure_daemon() -> Result<()> {
 
     let lock_file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .mode(0o600)
         .open(&lock_path);
