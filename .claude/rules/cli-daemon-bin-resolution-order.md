@@ -30,7 +30,7 @@ CLI 가 `clawketd` 바이너리를 찾을 때의 후보 우선순위는 **고정
 
 ## Why not global
 
-이 후보 리스트는 plugin 배포 layout (`~/.claude/plugins/clawket-*/bin/clawket` ↔ `.../daemon/bin/clawketd`), Homebrew tap, GitHub Release tarball, 수동 빌드 네 경로가 동시에 공존하는 cli sub-repo 의 배포 모델 특화 invariant 다. 글로벌 룰은 배포 layout 을 모른다.
+이 후보 리스트는 plugin 배포 layout (`~/.claude/plugins/clawket-*/bin/clawket` ↔ `.../daemon/bin/clawketd`), GitHub Release tarball, 수동 빌드 세 경로가 동시에 공존하는 cli sub-repo 의 배포 모델 특화 invariant 다. 글로벌 룰은 배포 layout 을 모른다.
 
 ## Enforcement gap
 
@@ -45,7 +45,7 @@ CLI 가 `clawketd` 바이너리를 찾을 때의 후보 우선순위는 **고정
 - 새 후보를 추가해야 하면 `paths::daemon_bin_candidates_inner` 에만 추가하고, 그에 대응하는 단위 테스트 (`paths.rs` `#[cfg(test)] mod tests`) 를 갱신한다.
 - `CLAWKET_DAEMON_BIN` env override 는 항상 후보 리스트 순회보다 **앞**에 둔다 (`resolve_daemon_bin` 의 if-let-Ok 블록 위치 유지).
 - `clawket doctor` 의 daemon-bin 진단 출력이 동일한 순서로 후보를 나열하는지 변경 시마다 확인.
-- 후보 추가 시 plugin 재설치 / Homebrew / XDG / 수동 빌드 시나리오 각각에서 선택이 의도대로 일어나는지 manual smoke 수행.
+- 후보 추가 시 plugin 재설치 / XDG / 수동 빌드 시나리오 각각에서 선택이 의도대로 일어나는지 manual smoke 수행.
 
 ### DON'T
 

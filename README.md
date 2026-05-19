@@ -25,7 +25,10 @@ cargo build --release
 ./target/release/clawket --version
 ```
 
-## v3.0 invariants
+## Plugin v3.0 invariants
+
+The invariants below trace to the **plugin contract version** ([`clawket/clawket`](https://github.com/clawket/clawket)) that this CLI implements — not the CLI binary's own version (see `Cargo.toml`).
+
 
 - **One active plan per project.** Approve a draft (`draft → active`) before starting tasks.
 - **Cycles belong to a unit** (`cycle create --unit UNIT-…`) and run `planning → active → completed`.

@@ -2,7 +2,7 @@
 
 The Clawket CLI — `clawket` binary plus the embedded `clawket mcp` stdio
 server (rmcp 1.5). Talks to the daemon ([`clawket/daemon`](https://github.com/clawket/daemon))
-over a Unix socket; users get a single binary install path via Homebrew or the
+over a Unix socket; users get a single binary install path via the
 `install.sh` one-liner.
 
 ## Cross-repo workflow
@@ -12,7 +12,7 @@ gate, PR / commit conventions, Conventional Commits bump policy, Code of Conduct
 is canonical in the meta repo:
 
 - [`clawket/clawket` › `docs/CONTRIBUTING.md`](https://github.com/clawket/clawket/blob/main/docs/CONTRIBUTING.md) — workflow + repo layout + submission rules
-- [`clawket/clawket` › `docs/RELEASING.md`](https://github.com/clawket/clawket/blob/main/docs/RELEASING.md) — release order across the seven repos
+- [`clawket/clawket` › `docs/RELEASING.md`](https://github.com/clawket/clawket/blob/main/docs/RELEASING.md) — release order across the five repos
 - [`clawket/clawket` › `CODE_OF_CONDUCT.md`](https://github.com/clawket/clawket/blob/main/CODE_OF_CONDUCT.md) — Contributor Covenant v2.1; reports go to **conduct@clawket.dev**
 
 Do not duplicate those rules here — they live in one place to avoid drift.
@@ -29,7 +29,7 @@ cargo build --release          # release build for performance work
 
 The CLI auto-spawns the daemon if one isn't running, so for end-to-end work
 you also need `clawketd` on `PATH` (or set `CLAWKET_DAEMON_BIN`). Build it
-from the daemon repo or `brew install clawket/tap/clawketd`.
+from the daemon repo.
 
 ## Run tests
 
