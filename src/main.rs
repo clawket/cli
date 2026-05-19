@@ -720,7 +720,8 @@ enum TaskAction {
         /// Estimated number of file edits
         #[arg(long)]
         estimated_edits: Option<i64>,
-        /// Cycle ID. Auto-inferred from active cycle if omitted. Tasks without a cycle go to backlog.
+        /// Cycle ID. Required by the daemon (`MISSING_CYCLE_ID` HTTP 400 if absent).
+        /// Use `clawket cycle list` or `clawket dashboard` to find the active cycle id.
         #[arg(long)]
         cycle: Option<String>,
         /// Task type: task, bug, feature, enhancement, refactor, docs, test, chore
