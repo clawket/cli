@@ -14,6 +14,7 @@
 | `cli-clap-evidence-mandatory.md` | `task complete --evidence` 는 `String` (필수). `Option` / `default_value` 우회 금지. |
 | `cli-daemon-bin-resolution-order.md` | 데몬 바이너리 후보 순서 (`CLAWKET_DAEMON_BIN` → plugin layout → sibling → XDG → PATH) 고정. |
 | `cli-unix-socket-only-no-tcp-fallback.md` | CLI client 는 UDS 전용. TCP fallback / 토큰 로딩 금지. |
+| `release-cascade-to-plugin-manifest.md` | `main` push 는 release.yml 을 trigger 해 `clawket/clawket` 에 components.json bump PR 을 자동 생성. 사용자 명시 지시 없이 push 금지. |
 
 ## 글로벌 룰과의 경계
 
