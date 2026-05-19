@@ -1,6 +1,6 @@
 # clawket/cli
 
-`clawket` 바이너리 — Clawket 데몬에 Unix socket 으로 말하는 Rust CLI. 동일 바이너리에 `clawket mcp` 서브커맨드로 MCP stdio 서버 (rmcp 1.5) 가 내장되어 있다. 사용자에게는 단일 바이너리 배포 (`tap/`, GitHub Releases, `install.sh`).
+`clawket` 바이너리 — Clawket 데몬에 Unix socket 으로 말하는 Rust CLI. 동일 바이너리에 `clawket mcp` 서브커맨드로 MCP stdio 서버 (rmcp 1.5) 가 내장되어 있다. 사용자에게는 단일 바이너리 배포 (GitHub Releases, `install.sh`).
 
 > 본 파일은 **이 sub-repo (cli)** 의 AI 컨텍스트 정본이다. Cross-repo 좌표 (compatibility matrix, release order, plugin install gate) 는 wrapper 인 `github.com/clawket/clawket` 의 `CLAUDE.md` + `docs/COMPATIBILITY.md` + `docs/RELEASING.md` 가 단일 진실 공급원 — 여기에 옮기지 않는다.
 
