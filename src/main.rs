@@ -205,6 +205,14 @@ enum Command {
         project: Option<String>,
     },
 
+    // ===== Events =====
+    /// Inspect the audit-log event stream. Subcommands cover finite SSE
+    /// replay of historical entries (`/events/replay`).
+    Events {
+        #[command(subcommand)]
+        action: EventsAction,
+    },
+
     // ===== Watch =====
     /// Stream live task / cycle / run events from the daemon (Server-Sent
     /// Events). Filter by project, task, or cycle. Runs until Ctrl-C.
@@ -684,6 +692,13 @@ enum CycleAction {
         /// Cycle ID
         id: String,
     },
+    /// Aggregate task status counts for one cycle (todo / in_progress / done /
+    /// blocked / cancelled / total) — single SQL aggregate served by the
+    /// daemon's `/cycles/:id/counts` endpoint.
+    Counts {
+        /// Cycle ID
+        id: String,
+    },
 }
 
 // ========== Task ==========
@@ -1123,6 +1138,23 @@ enum ArtifactAction {
         #[arg(long)]
         unit: Option<String>,
     },
+    /// Render the wiki hierarchy as a flat list ordered by parent/child via
+    /// recursive CTE (`/wiki/tree`). Filter by an arbitrary subtree root or
+    /// by plan. With `--format json` (default) emits the raw `Vec<Knowledge>`;
+    /// with `--tree` prints an indented outline by `parent_id`.
+    WikiTree {
+        /// Subtree root knowledge ID. When omitted, returns the full forest.
+        #[arg(long)]
+        root: Option<String>,
+        /// Restrict to entries attached to this plan.
+        #[arg(long)]
+        plan: Option<String>,
+        /// Pretty-print as an indented outline keyed on `parent_id`. Ignored
+        /// when `--format` is `json` / `yaml` / `table` (the default raw payload
+        /// is emitted instead).
+        #[arg(long)]
+        tree: bool,
+    },
 }
 
 // ========== Run ==========
@@ -1271,6 +1303,26 @@ enum CommentAction {
         /// New body (markdown supported)
         #[arg(allow_hyphen_values = true)]
         body: String,
+    },
+}
+
+// ========== Events ==========
+#[derive(Subcommand)]
+enum EventsAction {
+    /// Replay historical audit-log entries as a finite Server-Sent-Events
+    /// stream (`/events/replay`). The daemon emits one SSE event per
+    /// audit_log row then closes; the CLI prints one JSON object per event
+    /// on stdout and exits. Use the filters to narrow by entity.
+    Replay {
+        /// Filter by entity_type (e.g. "task", "cycle", "knowledge").
+        #[arg(long)]
+        entity_type: Option<String>,
+        /// Filter by entity_id (e.g. a specific TASK-/CYC-/ART- id).
+        #[arg(long)]
+        entity_id: Option<String>,
+        /// Maximum entries to replay (default: 200, matching the daemon).
+        #[arg(long, default_value = "200")]
+        limit: i64,
     },
 }
 
@@ -3568,6 +3620,48 @@ fn query_string(params: &[(&str, &Option<String>)]) -> String {
     }
 }
 
+/// Render a `Vec<Knowledge>` payload returned from `/wiki/tree` as an
+/// indented outline keyed on `parent_id`. Each line is `<indent>- <id>  <title>`.
+/// Entries whose `parent_id` is not present in the payload (e.g. a filtered
+/// subtree's parent lives outside the slice) are treated as roots so the
+/// caller always sees the full result set.
+fn print_wiki_tree(val: &serde_json::Value) {
+    let Some(arr) = val.as_array() else {
+        // Not a list — fall back to JSON so the caller still sees the payload.
+        println!("{}", serde_json::to_string(val).unwrap_or_default());
+        return;
+    };
+    use std::collections::{HashMap, HashSet};
+    let ids: HashSet<&str> = arr
+        .iter()
+        .filter_map(|n| n.get("id").and_then(|v| v.as_str()))
+        .collect();
+    let mut children: HashMap<Option<&str>, Vec<&serde_json::Value>> = HashMap::new();
+    for node in arr {
+        let parent = node
+            .get("parent_id")
+            .and_then(|v| v.as_str())
+            .filter(|p| ids.contains(p));
+        children.entry(parent).or_default().push(node);
+    }
+    fn walk(
+        children: &std::collections::HashMap<Option<&str>, Vec<&serde_json::Value>>,
+        parent: Option<&str>,
+        depth: usize,
+    ) {
+        let Some(nodes) = children.get(&parent) else {
+            return;
+        };
+        for node in nodes {
+            let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let title = node.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            println!("{}- {}  {}", "  ".repeat(depth), id, title);
+            walk(children, Some(id), depth + 1);
+        }
+    }
+    walk(&children, None, 0);
+}
+
 fn urlenc(s: &str) -> String {
     s.replace('%', "%25")
         .replace(' ', "%20")
@@ -4106,6 +4200,9 @@ async fn run_main() -> Result<()> {
                     .await?,
                 );
             }
+            CycleAction::Counts { id } => {
+                output(&client::get(&c, &format!("/cycles/{id}/counts")).await?);
+            }
         },
 
         // ===== Task =====
@@ -4518,6 +4615,19 @@ async fn run_main() -> Result<()> {
                     .await?,
                 );
             }
+            ArtifactAction::WikiTree { root, plan, tree } => {
+                let qs = query_string(&[("root_id", &root), ("plan_id", &plan)]);
+                let val = client::get(&c, &format!("/wiki/tree{qs}")).await?;
+                if tree && fmt == "json" {
+                    // Pretty-print as an indented outline keyed on parent_id.
+                    // The `--tree` toggle only takes effect for the default
+                    // `--format json` so users who explicitly request
+                    // table/yaml still get the raw payload.
+                    print_wiki_tree(&val);
+                } else {
+                    output(&val);
+                }
+            }
         },
 
         // ===== Run =====
@@ -4678,6 +4788,71 @@ async fn run_main() -> Result<()> {
             let qs = query_string(&[("project_id", &project)]);
             output(&client::get(&c, &format!("/dashboard/summary{qs}")).await?);
         }
+
+        // ===== Events =====
+        Command::Events { action } => match action {
+            EventsAction::Replay {
+                entity_type,
+                entity_id,
+                limit,
+            } => {
+                let mut qs_pairs: Vec<String> = Vec::new();
+                if let Some(t) = &entity_type {
+                    qs_pairs.push(format!("entity_type={}", urlenc(t)));
+                }
+                if let Some(id) = &entity_id {
+                    qs_pairs.push(format!("entity_id={}", urlenc(id)));
+                }
+                qs_pairs.push(format!("limit={limit}"));
+                let qs = format!("?{}", qs_pairs.join("&"));
+                let bytes = client::get_bytes(&c, &format!("/events/replay{qs}")).await?;
+                let text = std::str::from_utf8(&bytes).unwrap_or("");
+                // Parse the finite SSE stream into JSON-lines: collect
+                // `id:` / `event:` / `data:` fields per blank-line-delimited
+                // record. The daemon stuffs the audit_log row into `data:` as
+                // a single JSON object, so we re-emit each event as one line.
+                let mut cur_id: Option<String> = None;
+                let mut cur_event: Option<String> = None;
+                let mut cur_data = String::new();
+                let emit = |id: &Option<String>, ev: &Option<String>, data: &str| {
+                    if id.is_none() && ev.is_none() && data.is_empty() {
+                        return;
+                    }
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(data).unwrap_or(serde_json::Value::Null);
+                    let line = json!({
+                        "id": id,
+                        "event": ev,
+                        "data": parsed,
+                    });
+                    println!("{}", serde_json::to_string(&line).unwrap_or_default());
+                };
+                for raw_line in text.split('\n') {
+                    let line = raw_line.trim_end_matches('\r');
+                    if line.is_empty() {
+                        emit(&cur_id, &cur_event, &cur_data);
+                        cur_id = None;
+                        cur_event = None;
+                        cur_data.clear();
+                        continue;
+                    }
+                    if let Some(v) = line.strip_prefix("id:") {
+                        cur_id = Some(v.trim_start().to_string());
+                    } else if let Some(v) = line.strip_prefix("event:") {
+                        cur_event = Some(v.trim_start().to_string());
+                    } else if let Some(v) = line.strip_prefix("data:") {
+                        if !cur_data.is_empty() {
+                            cur_data.push('\n');
+                        }
+                        cur_data.push_str(v.trim_start());
+                    }
+                    // Other fields (retry:, :comment) are ignored.
+                }
+                // Flush the trailing record if the stream did not end with a
+                // blank line (defensive — SSE spec normally guarantees one).
+                emit(&cur_id, &cur_event, &cur_data);
+            }
+        },
 
         // ===== Watch (FIX-CLI-102) =====
         Command::Watch {

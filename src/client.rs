@@ -44,6 +44,33 @@ pub fn make_client() -> HttpClient {
     Client::builder(TokioExecutor::new()).build(connector)
 }
 
+/// Fetch a raw response body as bytes — used by callers that consume
+/// non-JSON payloads such as the finite SSE stream from `/events/replay`.
+/// Bails on connect failures and non-2xx responses (mirroring `get`).
+pub async fn get_bytes(client: &HttpClient, path: &str) -> Result<Bytes> {
+    let uri = format!("http://localhost{path}");
+    let resp = client
+        .get(uri.parse().context("invalid URI")?)
+        .await
+        .context("failed to connect to clawketd — is it running? (`clawket daemon start`)")?;
+    let status = resp.status();
+    let body = resp.into_body().collect().await?.to_bytes();
+    if !status.is_success() {
+        // Best-effort: try to surface a JSON error message if the body parses;
+        // otherwise emit the status line so the user sees something useful.
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
+            bail!(
+                "{}",
+                val.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("unknown error")
+            );
+        }
+        bail!("HTTP {}", status);
+    }
+    Ok(body)
+}
+
 pub async fn get(client: &HttpClient, path: &str) -> Result<serde_json::Value> {
     let uri = format!("http://localhost{path}");
     let resp = client
