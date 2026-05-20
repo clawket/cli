@@ -221,6 +221,7 @@ async fn make_task(
             "envelope": {
                 "version": 1,
                 "intent": format!("test fixture for {title}"),
+                "prompt_template": format!("prompt for {title}"),
                 "target_repo": "cli",
                 "context_refs": [],
                 "success_criteria": criteria,

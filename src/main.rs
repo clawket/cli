@@ -762,6 +762,20 @@ enum TaskAction {
         /// Format: BATCH-<26-char ULID>.
         #[arg(long)]
         batch_id: Option<String>,
+        /// Envelope `intent` — one-sentence statement of what this task
+        /// achieves. Required by the daemon (ENVELOPE_REQUIRED_FIELDS_MISSING
+        /// HTTP 400 if the resolved chain lacks it). May be omitted when
+        /// `--parent-task` supplies an active envelope to inherit from.
+        #[arg(long, allow_hyphen_values = true)]
+        intent: Option<String>,
+        /// Envelope `prompt_template` — the prompt body the executing
+        /// agent will run. Required (see `--intent`).
+        #[arg(long, allow_hyphen_values = true)]
+        prompt_template: Option<String>,
+        /// Envelope `success_criteria` — repeatable, one criterion per
+        /// flag (or comma-separated). Required (see `--intent`).
+        #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
+        success_criteria: Vec<String>,
     },
     /// View task details by ID
     View {
@@ -4225,6 +4239,9 @@ async fn run_main() -> Result<()> {
                 scenario_id,
                 evidence,
                 batch_id,
+                intent,
+                prompt_template,
+                success_criteria,
             } => {
                 // PDD A4: when --cycle is explicitly provided, --unit must also be provided
                 if cycle.is_some() && unit.is_none() {
@@ -4242,6 +4259,31 @@ async fn run_main() -> Result<()> {
                 } else {
                     Some(json!(label))
                 };
+                // Build the envelope payload only when at least one
+                // envelope flag is supplied. Otherwise leave it out so
+                // the daemon falls back to parent-task inheritance
+                // (`task_envelopes::resolve_chain`) or rejects with
+                // ENVELOPE_REQUIRED_FIELDS_MISSING — keeping the wire
+                // identical to "no envelope" rather than sending an
+                // empty `{}` which would also be rejected.
+                let envelope_val: Option<serde_json::Value> = if intent.is_some()
+                    || prompt_template.is_some()
+                    || !success_criteria.is_empty()
+                {
+                    let mut env = serde_json::Map::new();
+                    if let Some(v) = intent.as_ref() {
+                        env.insert("intent".into(), json!(v));
+                    }
+                    if let Some(v) = prompt_template.as_ref() {
+                        env.insert("prompt_template".into(), json!(v));
+                    }
+                    if !success_criteria.is_empty() {
+                        env.insert("success_criteria".into(), json!(success_criteria));
+                    }
+                    Some(serde_json::Value::Object(env))
+                } else {
+                    None
+                };
                 output(
                     &client::request(
                         &c,
@@ -4258,6 +4300,7 @@ async fn run_main() -> Result<()> {
                             "scenario_id": scenario_id,
                             "evidence": evidence,
                             "batch_id": batch_id,
+                            "envelope": envelope_val,
                         })),
                     )
                     .await?,

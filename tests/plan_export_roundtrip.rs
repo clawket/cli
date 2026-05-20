@@ -238,6 +238,7 @@ async fn seed_plan(
             "envelope": {
                 "version": 1,
                 "intent": "Add task_envelopes sidecar table",
+                "prompt_template": "Add a sidecar table for task envelopes per ADR.",
                 "target_repo": "daemon",
                 "context_refs": [{"kind": "decision", "id": "DEC-1"}],
                 "success_criteria": ["migration up/down passes"],
@@ -269,6 +270,7 @@ async fn seed_plan(
             "envelope": {
                 "version": 1,
                 "intent": "Wire sign_for_task into the importer",
+                "prompt_template": "Wire sign_for_task through the importer per ADR.",
                 "target_repo": "daemon",
                 "context_refs": [{"kind": "decision", "id": "DEC-1"}],
                 "success_criteria": ["round-trip parity"],
