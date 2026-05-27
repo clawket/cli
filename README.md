@@ -46,7 +46,10 @@ clawket plan approve PLAN-xxx
 clawket unit create --plan PLAN-xxx "Unit 1"
 clawket cycle create --project PROJ-my-app --unit UNIT-xxx "Sprint 1"
 clawket cycle activate CYC-xxx
-clawket task create "Build login" --cycle CYC-xxx
+clawket task create "Build login" --cycle CYC-xxx \
+  --intent "Implement the login screen and auth call" \
+  --prompt-template "Build the login form and wire it to the auth endpoint" \
+  --success-criteria "valid creds redirect to /home,invalid creds show error"
 clawket task update TASK-xxx --status in_progress
 clawket task complete TASK-xxx --evidence "src/login.rs:42 — hash verified"
 ```
@@ -71,9 +74,9 @@ Global flags (apply to all commands): `--format json|table|yaml`, `--quiet`, `--
 | `project` (alias `proj`) | `create`, `view`, `list`, `update`, `delete`, `disable`, `enable`, `resolve`, `cwd {add,remove,list}` |
 | `plan` (alias `pl`) | `create`, `view`, `list`, `update`, `delete`, `approve`, `complete`, `import`, `export` |
 | `unit` (alias `u`) | `create`, `view`, `list`, `update`, `delete` |
-| `cycle` (alias `cy`) | `create`, `view`, `list`, `update`, `delete`, `activate`, `complete` |
+| `cycle` (alias `cy`) | `create`, `view`, `list`, `update`, `delete`, `activate`, `complete`, `counts` |
 | `task` (alias `t`) | `create`, `view`, `list`, `update`, `delete`, `append-body`, `search`, `complete`, `cancel`, `block`, `unblock`, `decompose`, `tree`, `ancestors`, `stats`, `descendants` |
-| `knowledge` | `create`, `view`, `list`, `update`, `delete`, `search`, `import`, `export` — wiki content the LLM retrieves via MCP. |
+| `knowledge` | `create`, `view`, `list`, `update`, `delete`, `search`, `import`, `export`, `wiki-tree` — wiki content the LLM retrieves via MCP. |
 | `run` (alias `r`) | `start`, `finish`, `view`, `list` |
 | `comment` (alias `c`) | `create`, `list`, `update`, `delete` |
 | `question` (alias `q`) | `create`, `answer`, `view`, `list` |
@@ -96,6 +99,7 @@ Global flags (apply to all commands): `--format json|table|yaml`, `--quiet`, `--
 |---|---|
 | `watch [--project / --task / --cycle] [--format text\|json]` | SSE stream of task/cycle/run events; runs until Ctrl-C. |
 | `replay TASK [--limit N]` | Print the run history of a task in order. |
+| `events replay [filters]` | Replay historical audit-log entries as a finite SSE stream (`/events/replay`); prints one JSON object per row then exits. |
 
 ### Knowledge shortcuts (top-level)
 

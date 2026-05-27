@@ -9,7 +9,7 @@
 | 항목 | 버전 / 비고 |
 |---|---|
 | 언어 | Rust 2024 edition |
-| Crate | `clawket` v0.3.0 (`Cargo.toml:2-3`) |
+| Crate | `clawket` v0.4.0 (`Cargo.toml:2-3`) |
 | CLI 파서 | `clap` 4 (derive + env) |
 | MCP | `rmcp` 1.5 (`server`, `transport-io`) — stdio only |
 | HTTP 클라 | `hyper` 1 + `hyper-util` (Unix socket 전용; TCP fallback 없음) |

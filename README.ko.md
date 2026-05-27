@@ -47,7 +47,10 @@ clawket plan approve PLAN-xxx
 clawket unit create --plan PLAN-xxx "Unit 1"
 clawket cycle create --project PROJ-my-app --unit UNIT-xxx "Sprint 1"
 clawket cycle activate CYC-xxx
-clawket task create "Build login" --cycle CYC-xxx
+clawket task create "Build login" --cycle CYC-xxx \
+  --intent "로그인 화면 구현 및 인증 호출 연결" \
+  --prompt-template "로그인 폼을 만들고 인증 엔드포인트에 연결" \
+  --success-criteria "유효 자격증명은 /home 으로 리다이렉트,무효 자격증명은 에러 표시"
 clawket task update TASK-xxx --status in_progress
 clawket task complete TASK-xxx --evidence "src/login.rs:42 — hash verified"
 ```
@@ -72,9 +75,9 @@ clawket task complete TASK-xxx --evidence "src/login.rs:42 — hash verified"
 | `project` (alias `proj`) | `create`, `view`, `list`, `update`, `delete`, `disable`, `enable`, `resolve`, `cwd {add,remove,list}` |
 | `plan` (alias `pl`) | `create`, `view`, `list`, `update`, `delete`, `approve`, `complete`, `import`, `export` |
 | `unit` (alias `u`) | `create`, `view`, `list`, `update`, `delete` |
-| `cycle` (alias `cy`) | `create`, `view`, `list`, `update`, `delete`, `activate`, `complete` |
+| `cycle` (alias `cy`) | `create`, `view`, `list`, `update`, `delete`, `activate`, `complete`, `counts` |
 | `task` (alias `t`) | `create`, `view`, `list`, `update`, `delete`, `append-body`, `search`, `complete`, `cancel`, `block`, `unblock`, `decompose`, `tree`, `ancestors`, `stats`, `descendants` |
-| `knowledge` | `create`, `view`, `list`, `update`, `delete`, `search`, `import`, `export` — LLM 이 MCP 로 가져갈 wiki 컨텐츠. |
+| `knowledge` | `create`, `view`, `list`, `update`, `delete`, `search`, `import`, `export`, `wiki-tree` — LLM 이 MCP 로 가져갈 wiki 컨텐츠. |
 | `run` (alias `r`) | `start`, `finish`, `view`, `list` |
 | `comment` (alias `c`) | `create`, `list`, `update`, `delete` |
 | `question` (alias `q`) | `create`, `answer`, `view`, `list` |
@@ -97,6 +100,7 @@ clawket task complete TASK-xxx --evidence "src/login.rs:42 — hash verified"
 |---|---|
 | `watch [--project / --task / --cycle] [--format text\|json]` | task/cycle/run SSE 스트림. Ctrl-C 까지 지속. |
 | `replay TASK [--limit N]` | 태스크의 run 이력을 순서대로 출력. |
+| `events replay [필터]` | 감사 로그(audit-log) 항목을 유한 SSE 스트림으로 리플레이(`/events/replay`); 행마다 JSON 하나 출력 후 종료. |
 
 ### Knowledge 단축 (top-level)
 
