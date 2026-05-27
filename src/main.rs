@@ -17,7 +17,7 @@ use serde_json::json;
 #[command(
     name = "clawket",
     version,
-    about = "LLM-native work management CLI for Claude Code (v3.0).\n\nWorkflow: Project → Plan (approve) → Unit → Cycle (--unit required, activate) → Task\n\nInvariants (v3.0):\n  - One active plan per project. Approve a draft (draft → active) before starting tasks.\n  - Cycles belong to a unit (`cycle create --unit UNIT-…`) and run planning → active → completed.\n  - One active cycle per unit. Completed cycles cannot be restarted — create a new one.\n  - Unit is a pure grouping entity (no status, no approval).\n  - Task is the only entity managed directly: todo → in_progress → done/cancelled (blocked for external dependencies).\n  - Transitioning a task to `done` requires `--evidence` (file:line or reasoning summary).\n\nQuick start:\n  clawket project create \"my-app\" --cwd .\n  clawket plan create --project PROJ-my-app \"MVP\"\n  clawket plan approve PLAN-xxx\n  clawket unit create --plan PLAN-xxx \"Unit 1\"\n  clawket cycle create --project PROJ-my-app --unit UNIT-xxx \"Sprint 1\"\n  clawket cycle activate CYC-xxx\n  clawket task create \"Build login\" --cycle CYC-xxx\n  clawket task update TASK-xxx --status in_progress\n  clawket task complete TASK-xxx --evidence \"src/login.rs:42 — hash verified\""
+    about = "LLM-native work management CLI for Claude Code (v3.0).\n\nWorkflow: Project → Plan (approve) → Unit → Cycle (--unit required, activate) → Task\n\nInvariants (v3.0):\n  - One active plan per project. Approve a draft (draft → active) before starting tasks.\n  - Cycles belong to a unit (`cycle create --unit UNIT-…`) and run planning → active → completed.\n  - One active cycle per unit. Completed cycles cannot be restarted — create a new one.\n  - Unit is a pure grouping entity (no status, no approval).\n  - Task is the only entity managed directly: todo → in_progress → done/cancelled (blocked for external dependencies).\n  - Transitioning a task to `done` requires `--evidence` (file:line or reasoning summary).\n  - Reaching a terminal task state (done/cancelled) auto-completes the cycle once every task in it is terminal, and the plan once every task in it is terminal (active → completed). Units have no status and never cascade.\n\nQuick start:\n  clawket project create \"my-app\" --cwd .\n  clawket plan create --project PROJ-my-app \"MVP\"\n  clawket plan approve PLAN-xxx\n  clawket unit create --plan PLAN-xxx \"Unit 1\"\n  clawket cycle create --project PROJ-my-app --unit UNIT-xxx \"Sprint 1\"\n  clawket cycle activate CYC-xxx\n  clawket task create \"Build login\" --cycle CYC-xxx\n  clawket task update TASK-xxx --status in_progress\n  clawket task complete TASK-xxx --evidence \"src/login.rs:42 — hash verified\""
 )]
 struct Cli {
     /// Output format: json (default) | table | yaml. Applies to commands
@@ -214,8 +214,9 @@ enum Command {
     },
 
     // ===== Watch =====
-    /// Stream live task / cycle / run events from the daemon (Server-Sent
-    /// Events). Filter by project, task, or cycle. Runs until Ctrl-C.
+    /// Stream live entity-change events from the daemon (task / plan / unit /
+    /// cycle / knowledge / run) as Server-Sent Events. Filter by project,
+    /// task, or cycle. Runs until Ctrl-C.
     Watch {
         /// Filter by project ID
         #[arg(long)]
@@ -226,8 +227,12 @@ enum Command {
         /// Filter by cycle ID
         #[arg(long)]
         cycle: Option<String>,
-        /// Output format: text | json (default: text)
-        #[arg(long, default_value = "text")]
+        /// Output format per event line. `text` (default) prints
+        /// `[id] event_name data`; `json` prints `{id, event, data}` as a
+        /// JSON object per line (the daemon's data payload is re-parsed as
+        /// JSON when possible). Stdout is flushed after every event so
+        /// downstream pipes see events as they arrive.
+        #[arg(long, default_value = "text", value_parser = ["text", "json"])]
         format: String,
     },
 
@@ -523,7 +528,8 @@ enum PlanAction {
         /// Plan ID
         id: String,
     },
-    /// Mark an active plan as completed (active → completed)
+    /// Mark an active plan as completed (active → completed).
+    /// Plans also auto-complete when every task in the plan reaches a terminal state (done/cancelled), so this is for closing a plan early.
     Complete {
         /// Plan ID
         id: String,
@@ -688,6 +694,7 @@ enum CycleAction {
         id: String,
     },
     /// Mark an active cycle as completed (active → completed). Cannot be restarted afterwards.
+    /// Cycles also auto-complete when their last task reaches a terminal state (done/cancelled), so this is for closing a cycle early.
     Complete {
         /// Cycle ID
         id: String,
@@ -829,7 +836,7 @@ enum TaskAction {
         #[arg(long)]
         offset: Option<i64>,
     },
-    /// Update task fields. Status values: todo, in_progress, blocked, done, cancelled. Pass empty string ("") to --cycle to detach (move to backlog).
+    /// Update task fields. Status values: todo, in_progress, blocked, done, cancelled. Pass empty string ("") to --cycle to detach (move to backlog). Reaching a terminal status (done/cancelled) auto-completes the cycle/plan once their remaining tasks are all terminal.
     Update {
         /// Task ID (TASK-ULID or ticket number like CK-285)
         id: String,
@@ -913,7 +920,9 @@ enum TaskAction {
     },
     /// Mark a task as done (shortcut for `task update --status done
     /// --evidence …`). The daemon enforces EVIDENCE_REQUIRED on the done
-    /// transition, so `--evidence` is mandatory here.
+    /// transition, so `--evidence` is mandatory here. When this is the last
+    /// non-terminal task, the daemon auto-completes its cycle and plan
+    /// (active → completed).
     Complete {
         /// Task ID (TASK-ULID or ticket number)
         id: String,
@@ -927,7 +936,9 @@ enum TaskAction {
         #[arg(long, env = "CLAWKET_AGENT_NAME", default_value = "main", hide = true)]
         agent: String,
     },
-    /// Cancel a task (alias for `task update --status cancelled`)
+    /// Cancel a task (alias for `task update --status cancelled`). Like done,
+    /// cancelled is terminal: when this is the last non-terminal task, the
+    /// daemon auto-completes its cycle and plan (active → completed).
     Cancel {
         /// Task ID (TASK-ULID or ticket number)
         id: String,
@@ -4902,14 +4913,36 @@ async fn run_main() -> Result<()> {
             project,
             task,
             cycle,
-            format: _fmt,
+            format,
         } => {
+            use std::io::Write;
             let qs = query_string(&[
                 ("project_id", &project),
                 ("task_id", &task),
                 ("cycle_id", &cycle),
             ]);
-            output(&client::get(&c, &format!("/events{qs}")).await?);
+            let json_mode = format.as_str() == "json";
+            let path = format!("/events{qs}");
+            client::stream_sse(&c, &path, |ev| {
+                let mut out = std::io::stdout().lock();
+                if json_mode {
+                    let data_val: serde_json::Value = serde_json::from_str(&ev.data)
+                        .unwrap_or_else(|_| serde_json::Value::String(ev.data.clone()));
+                    let line = serde_json::json!({
+                        "id": ev.id,
+                        "event": ev.event,
+                        "data": data_val,
+                    });
+                    writeln!(out, "{}", serde_json::to_string(&line)?)?;
+                } else {
+                    let id_str = ev.id.as_deref().unwrap_or("-");
+                    let name = ev.event.as_deref().unwrap_or("message");
+                    writeln!(out, "[{}] {} {}", id_str, name, ev.data)?;
+                }
+                out.flush()?;
+                Ok(())
+            })
+            .await?;
         }
 
         // ===== Replay (FIX-CLI-102) =====

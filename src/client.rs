@@ -112,6 +112,89 @@ pub async fn request(
 /// Like `request` but returns the raw `(status, body)` pair so callers can
 /// inspect structured `details` on non-success responses (e.g. lease 409
 /// holder info). Connect-level failures still bail.
+/// A single Server-Sent Event parsed from the daemon stream. `data` is the
+/// joined `data:` lines (newline-separated per the SSE spec) — callers parse
+/// it as JSON when the daemon emits a JSON payload.
+pub struct SseEvent {
+    pub id: Option<String>,
+    pub event: Option<String>,
+    pub data: String,
+}
+
+/// Stream Server-Sent Events from `path` and invoke `on_event` for each event
+/// as it arrives. Returns when the connection closes (daemon shutdown) or
+/// `on_event` returns Err. Used by `clawket watch` to render the daemon's
+/// infinite `/events` stream incrementally — `get` / `get_bytes` buffer the
+/// whole body and so cannot be used for streams that never terminate.
+pub async fn stream_sse<F>(client: &HttpClient, path: &str, mut on_event: F) -> Result<()>
+where
+    F: FnMut(&SseEvent) -> Result<()>,
+{
+    let uri: hyper::Uri = format!("http://localhost{path}")
+        .parse()
+        .context("invalid URI")?;
+    let req = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("accept", "text/event-stream")
+        .body(Full::new(Bytes::new()))
+        .context("failed to build request")?;
+
+    let resp = client
+        .request(req)
+        .await
+        .context("failed to connect to clawketd — is it running? (`clawket daemon start`)")?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        bail!("HTTP {} from {}", status, path);
+    }
+
+    let mut body = resp.into_body();
+    let mut pending: Vec<u8> = Vec::new();
+    let mut cur_id: Option<String> = None;
+    let mut cur_event: Option<String> = None;
+    let mut data_lines: Vec<String> = Vec::new();
+
+    while let Some(frame_result) = body.frame().await {
+        let frame = frame_result.context("SSE stream error")?;
+        let Ok(chunk) = frame.into_data() else { continue };
+        pending.extend_from_slice(&chunk);
+
+        // Consume complete lines (LF-terminated, optional CR before LF).
+        while let Some(nl) = pending.iter().position(|&b| b == b'\n') {
+            let line_bytes: Vec<u8> = pending.drain(..=nl).collect();
+            let mut end = line_bytes.len() - 1;
+            if end > 0 && line_bytes[end - 1] == b'\r' {
+                end -= 1;
+            }
+            let line = std::str::from_utf8(&line_bytes[..end]).unwrap_or("");
+
+            if line.is_empty() {
+                // Blank line — dispatch the accumulated event.
+                if cur_id.is_some() || cur_event.is_some() || !data_lines.is_empty() {
+                    let ev = SseEvent {
+                        id: cur_id.take(),
+                        event: cur_event.take(),
+                        data: data_lines.join("\n"),
+                    };
+                    data_lines.clear();
+                    on_event(&ev)?;
+                }
+            } else if line.starts_with(':') {
+                // SSE comment, ignore.
+            } else if let Some(val) = line.strip_prefix("id:") {
+                cur_id = Some(val.trim_start().to_string());
+            } else if let Some(val) = line.strip_prefix("event:") {
+                cur_event = Some(val.trim_start().to_string());
+            } else if let Some(val) = line.strip_prefix("data:") {
+                data_lines.push(val.trim_start().to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn request_raw(
     client: &HttpClient,
     method: &str,
