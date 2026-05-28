@@ -9,7 +9,7 @@
 | 항목 | 버전 / 비고 |
 |---|---|
 | 언어 | Rust 2024 edition |
-| Crate | `clawket` v0.4.0 (`Cargo.toml:2-3`) |
+| Crate | `clawket` v0.5.0 (`Cargo.toml:2-3`) |
 | CLI 파서 | `clap` 4 (derive + env) |
 | MCP | `rmcp` 1.5 (`server`, `transport-io`) — stdio only |
 | HTTP 클라 | `hyper` 1 + `hyper-util` (Unix socket 전용; TCP fallback 없음) |
@@ -47,7 +47,7 @@
 
 ## MCP read-only tools
 
-CLI 가 내장 stdio 서버로 노출하는 5 개 — 모두 `/knowledge/*` 또는 `/tasks/*` GET 엔드포인트만 호출한다 (mutation 없음). 데몬이 응답 단에서 `scope` 필터를 책임지며, CLI 는 응답을 그대로 중계한다.
+CLI 가 내장 stdio 서버로 노출하는 5 개 — 모두 `/knowledge/*` 또는 `/tasks/*` GET 엔드포인트만 호출한다 (mutation 없음). CLI 는 데몬 응답을 그대로 중계하며 자체 필터링을 하지 않는다.
 
 | Tool | 데몬 엔드포인트 | `src/mcp.rs` line |
 |---|---|---|
