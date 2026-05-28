@@ -960,7 +960,7 @@ fn run_mcp_check(tally: &mut Vec<Severity>) {
     }
     println!("  exposed tools (read-only RAG):");
     for tool in [
-        "search_artifacts",
+        "search_knowledge",
         "search_tasks",
         "find_similar_tasks",
         "get_task_context",

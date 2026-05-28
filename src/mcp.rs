@@ -81,7 +81,7 @@ pub struct GetTaskContextArgs {
     #[schemars(description = "Task ID (TASK-ULID 또는 CK-xxx)")]
     pub task_id: String,
     #[schemars(
-        description = "포함할 섹션 [artifacts, relations, comments, history]. 기본 [artifacts, relations]"
+        description = "포함할 섹션 [knowledge, relations, comments, history]. 기본 [knowledge, relations]"
     )]
     #[serde(default)]
     pub include: Option<Vec<String>>,
