@@ -145,7 +145,7 @@ enum Command {
     /// Manage knowledge entries — wiki content the LLM retrieves via MCP.
     Knowledge {
         #[command(subcommand)]
-        action: ArtifactAction,
+        action: KnowledgeAction,
     },
     /// Manage runs (per-task execution records — usually auto-created by hooks).
     #[command(alias = "r")]
@@ -1051,9 +1051,9 @@ enum TaskAction {
     },
 }
 
-// ========== Artifact ==========
+// ========== Knowledge ==========
 #[derive(Subcommand)]
-enum ArtifactAction {
+enum KnowledgeAction {
     /// Create a knowledge entry (document, decision, reference). Attach to at least one of task/unit/plan.
     Create {
         /// Knowledge title
@@ -4558,7 +4558,7 @@ async fn run_main() -> Result<()> {
         },
 
         Command::Knowledge { action } => match action {
-            ArtifactAction::Create {
+            KnowledgeAction::Create {
                 title,
                 r#type,
                 task,
@@ -4574,10 +4574,10 @@ async fn run_main() -> Result<()> {
                     "parent_id": parent,
                 }))).await?);
             }
-            ArtifactAction::View { id } => {
+            KnowledgeAction::View { id } => {
                 output(&client::get(&c, &format!("/knowledge/{id}")).await?)
             }
-            ArtifactAction::Update {
+            KnowledgeAction::Update {
                 id,
                 title,
                 content,
@@ -4607,7 +4607,7 @@ async fn run_main() -> Result<()> {
                     .await?,
                 );
             }
-            ArtifactAction::List {
+            KnowledgeAction::List {
                 task,
                 unit,
                 plan,
@@ -4622,10 +4622,10 @@ async fn run_main() -> Result<()> {
                 ]);
                 output(&client::get(&c, &format!("/knowledge{qs}")).await?);
             }
-            ArtifactAction::Delete { id } => {
+            KnowledgeAction::Delete { id } => {
                 output(&client::request(&c, "DELETE", &format!("/knowledge/{id}"), None).await?);
             }
-            ArtifactAction::Search {
+            KnowledgeAction::Search {
                 query,
                 mode,
                 r#type,
@@ -4638,7 +4638,7 @@ async fn run_main() -> Result<()> {
                 }
                 output(&client::get(&c, &format!("/knowledge/search{qs}")).await?);
             }
-            ArtifactAction::Import {
+            KnowledgeAction::Import {
                 cwd,
                 plan,
                 unit,
@@ -4656,7 +4656,7 @@ async fn run_main() -> Result<()> {
                     .await?,
                 );
             }
-            ArtifactAction::Export { cwd, plan, unit } => {
+            KnowledgeAction::Export { cwd, plan, unit } => {
                 output(
                     &client::request(
                         &c,
@@ -4669,7 +4669,7 @@ async fn run_main() -> Result<()> {
                     .await?,
                 );
             }
-            ArtifactAction::WikiTree { root, plan, tree } => {
+            KnowledgeAction::WikiTree { root, plan, tree } => {
                 let qs = query_string(&[("root_id", &root), ("plan_id", &plan)]);
                 let val = client::get(&c, &format!("/wiki/tree{qs}")).await?;
                 if tree && fmt == "json" {
