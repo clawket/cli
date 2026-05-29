@@ -893,6 +893,12 @@ enum TaskAction {
         /// Format: BATCH-<26-char ULID>.
         #[arg(long)]
         batch_id: Option<String>,
+        /// Blocked-reason text. Required by the daemon when transitioning
+        /// to `--status blocked` (BLOCKED_REASON_REQUIRED). Pass "" to
+        /// clear an existing blocked_reason (allowed only when the new
+        /// status is not `blocked`).
+        #[arg(long, allow_hyphen_values = true)]
+        blocked_reason: Option<String>,
     },
     /// Delete a task (only allowed when its plan is still in draft)
     Delete {
@@ -1687,6 +1693,21 @@ async fn task_transition<F>(
 where
     F: Fn(&serde_json::Value),
 {
+    task_transition_with_blocked_reason(c, id, status, comment, evidence, None, agent, output).await
+}
+
+/// Pure builder for the PATCH /tasks/{id} body emitted by transition
+/// commands. Extracted so it can be unit-tested without spinning up the
+/// daemon — the original LM-11083 regression (silently dropping
+/// `blocked_reason`) was undetectable because payload construction was
+/// inlined inside an `async fn` that also did I/O.
+fn build_transition_payload(
+    status: &str,
+    comment: Option<&str>,
+    evidence: Option<&str>,
+    blocked_reason: Option<&str>,
+    agent: &str,
+) -> serde_json::Value {
     let mut payload = json!({ "status": status, "_agent": agent });
     if let Some(text) = comment {
         payload["_comment"] = json!(text);
@@ -1695,9 +1716,93 @@ where
     if let Some(text) = evidence {
         payload["evidence"] = json!(text);
     }
+    if let Some(text) = blocked_reason {
+        payload["blocked_reason"] = json!(text);
+    }
+    payload
+}
+
+/// Extended variant of `task_transition` that also threads a `blocked_reason`
+/// onto the PATCH body. The daemon's transition validator enforces
+/// `BLOCKED_REASON_REQUIRED` when moving to `status=blocked`, so callers that
+/// expose a `--reason` flag for the block transition must surface it here
+/// (LM-11083). For other transitions the field is harmless — daemon ignores
+/// `blocked_reason` when the new status is not `blocked`.
+#[allow(clippy::too_many_arguments)]
+async fn task_transition_with_blocked_reason<F>(
+    c: &client::HttpClient,
+    id: &str,
+    status: &str,
+    comment: Option<&str>,
+    evidence: Option<&str>,
+    blocked_reason: Option<&str>,
+    agent: &str,
+    output: F,
+) -> Result<()>
+where
+    F: Fn(&serde_json::Value),
+{
+    let payload = build_transition_payload(status, comment, evidence, blocked_reason, agent);
     let val = client::request(c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?;
     output(&val);
     Ok(())
+}
+
+#[cfg(test)]
+mod task_transition_payload_tests {
+    //! LM-11083 — regression coverage for `task block --reason` propagating
+    //! the daemon's `blocked_reason` field on PATCH /tasks/{id}. Prior to
+    //! the fix the reason was silently swallowed, and the daemon rejected
+    //! the transition with BLOCKED_REASON_REQUIRED.
+    use super::build_transition_payload;
+    use serde_json::json;
+
+    #[test]
+    fn block_transition_with_reason_emits_blocked_reason_field() {
+        let payload = build_transition_payload(
+            "blocked",
+            Some("waiting on upstream API"),
+            None,
+            Some("waiting on upstream API"),
+            "main",
+        );
+        assert_eq!(payload["status"], json!("blocked"));
+        assert_eq!(payload["blocked_reason"], json!("waiting on upstream API"));
+        // Reason is also surfaced as a comment so the audit trail keeps
+        // the historical behavior — but the regression is the missing
+        // `blocked_reason` key, which is what the daemon validates.
+        assert_eq!(payload["_comment"], json!("waiting on upstream API"));
+        assert_eq!(payload["_author"], json!("main"));
+        assert_eq!(payload["_agent"], json!("main"));
+    }
+
+    #[test]
+    fn non_block_transition_omits_blocked_reason_field() {
+        let payload = build_transition_payload("in_progress", None, None, None, "main");
+        assert_eq!(payload["status"], json!("in_progress"));
+        assert!(
+            payload.get("blocked_reason").is_none(),
+            "blocked_reason must not leak onto non-block transitions: {payload}"
+        );
+        assert!(payload.get("evidence").is_none());
+        assert!(payload.get("_comment").is_none());
+    }
+
+    #[test]
+    fn done_transition_carries_evidence_but_not_blocked_reason() {
+        let payload = build_transition_payload(
+            "done",
+            Some("see PR #42"),
+            Some("src/foo.rs:120"),
+            None,
+            "agent-x",
+        );
+        assert_eq!(payload["status"], json!("done"));
+        assert_eq!(payload["evidence"], json!("src/foo.rs:120"));
+        assert_eq!(payload["_comment"], json!("see PR #42"));
+        assert_eq!(payload["_author"], json!("agent-x"));
+        assert!(payload.get("blocked_reason").is_none());
+    }
 }
 
 mod commands {
@@ -4386,6 +4491,7 @@ async fn run_main() -> Result<()> {
                 scenario_id,
                 evidence,
                 batch_id,
+                blocked_reason,
             } => {
                 let mut payload = json!({});
                 if let Some(v) = title {
@@ -4437,6 +4543,12 @@ async fn run_main() -> Result<()> {
                 }
                 if let Some(v) = batch_id {
                     payload["batch_id"] = json!(v);
+                }
+                // LM-11083: surface daemon's `blocked_reason` field through
+                // the generic update command. Empty string clears the field
+                // (daemon side treats it as `Some(None)` via value_to_opt_string).
+                if let Some(v) = blocked_reason {
+                    payload["blocked_reason"] = json!(v);
                 }
                 output(
                     &client::request(&c, "PATCH", &format!("/tasks/{id}"), Some(payload)).await?,
@@ -4490,8 +4602,21 @@ async fn run_main() -> Result<()> {
                 .await?;
             }
             TaskAction::Block { id, reason, agent } => {
-                task_transition(&c, &id, "blocked", reason.as_deref(), None, &agent, output)
-                    .await?;
+                // LM-11083: forward --reason both as a comment (audit trail)
+                // and as the daemon's `blocked_reason` field (transition
+                // validator requirement). Without the latter the daemon
+                // rejects with BLOCKED_REASON_REQUIRED.
+                task_transition_with_blocked_reason(
+                    &c,
+                    &id,
+                    "blocked",
+                    reason.as_deref(),
+                    None,
+                    reason.as_deref(),
+                    &agent,
+                    output,
+                )
+                .await?;
             }
             TaskAction::Unblock { id, comment, agent } => {
                 task_transition(&c, &id, "todo", comment.as_deref(), None, &agent, output).await?;
