@@ -158,7 +158,9 @@ where
 
     while let Some(frame_result) = body.frame().await {
         let frame = frame_result.context("SSE stream error")?;
-        let Ok(chunk) = frame.into_data() else { continue };
+        let Ok(chunk) = frame.into_data() else {
+            continue;
+        };
         pending.extend_from_slice(&chunk);
 
         // Consume complete lines (LF-terminated, optional CR before LF).
