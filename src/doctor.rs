@@ -163,17 +163,17 @@ pub async fn run(json_output: bool, plan: Option<String>, escalation: bool) -> R
     // ===== Supplemental diagnostics (kept from v2 — not in v3 plan list) =====
 
     // LM-9: Five-item data-loss-risk panel.
-    section("Data loss risk diagnostics (LM-9)");
+    section("Data loss risk diagnostics");
     run_data_loss_diagnostics(&data, &state, task_count_now, &mut tally);
     println!();
 
     // LM-69 / ADR-0010: activity_log retention budget panel.
-    section("activity_log retention (LM-69)");
+    section("activity_log retention");
     run_activity_log_budget_check(&client, &mut tally).await;
     println!();
 
     // LM-259 / L1.4.c — project.enabled state for the current cwd.
-    section("Project enable state (LM-8)");
+    section("Project enable state");
     run_project_enabled_check(&client, &mut tally).await;
     println!();
 
@@ -222,7 +222,7 @@ pub async fn run(json_output: bool, plan: Option<String>, escalation: bool) -> R
     run_extra_checks(&client, &mut tally).await;
 
     // [Path separation invariant (LM-8)] — placed last per v3 plan.
-    section("Path separation invariant (LM-8)");
+    section("Path separation invariant");
     let mut overlap_count = 0u32;
     for (label, p) in [
         ("data", &data),
