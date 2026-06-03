@@ -970,7 +970,7 @@ fn run_mcp_check(tally: &mut Vec<Severity>) {
     }
 }
 
-/// [Compatibility] — read the plugin's package.json `compat` ranges and
+/// [Compatibility] — read the plugin's compat.json `compat` ranges and
 /// compare against the daemon-reported version (and the CLI's compile-time
 /// version). We do not parse semver ranges to the letter; we surface the
 /// raw range so users can verify it themselves and we flag the obvious
@@ -987,33 +987,28 @@ fn run_compatibility_check(health: Option<&Value>, tally: &mut Vec<Severity>) {
         None => println!("  daemon version: (unavailable — daemon down?)"),
     }
 
-    // Read package.json compat table.
-    let pkg = read_plugin_package_json();
-    match pkg {
-        Some(val) => {
-            let compat = val.get("compat");
-            match compat {
-                Some(Value::Object(map)) => {
-                    println!("  package.json compat:");
-                    for (k, v) in map {
-                        if let Some(s) = v.as_str() {
-                            println!("    {k}: {s}");
-                        }
-                    }
-                    tally.push(Severity::Ok);
-                }
-                _ => {
-                    println!(
-                        "  {} package.json found but no `compat` field",
-                        Severity::Warn.tag()
-                    );
-                    tally.push(Severity::Warn);
+    // Read compat.json compat table.
+    let compat = read_compat_json();
+    match compat {
+        Some(Value::Object(map)) => {
+            println!("  compat.json:");
+            for (k, v) in map {
+                if let Some(s) = v.as_str() {
+                    println!("    {k}: {s}");
                 }
             }
+            tally.push(Severity::Ok);
+        }
+        Some(_) => {
+            println!(
+                "  {} compat.json found but not an object",
+                Severity::Warn.tag()
+            );
+            tally.push(Severity::Warn);
         }
         None => {
             println!(
-                "  {} plugin package.json not found — compat range unknown",
+                "  {} compat.json not found — compat ranges unknown",
                 Severity::Info.tag()
             );
             tally.push(Severity::Info);
@@ -1031,10 +1026,10 @@ fn run_compatibility_check(health: Option<&Value>, tally: &mut Vec<Severity>) {
     }
 }
 
-fn read_plugin_package_json() -> Option<Value> {
+fn read_compat_json() -> Option<Value> {
     for path in plugin_root_candidates()
         .into_iter()
-        .map(|r| r.join("package.json"))
+        .map(|r| r.join("compat.json"))
     {
         if let Ok(raw) = fs::read_to_string(&path)
             && let Ok(val) = serde_json::from_str::<Value>(&raw)
