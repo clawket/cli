@@ -1,6 +1,6 @@
 [package]
 name = "clawket"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "Structured task contracts for LLM coding agents — Rust CLI for the Clawket daemon (embeds MCP stdio server)"
 license = "MIT"
