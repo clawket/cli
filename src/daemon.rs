@@ -39,8 +39,77 @@ fn read_pid() -> Option<u32> {
 }
 
 fn is_running(pid: u32) -> bool {
-    // kill -0 으로 프로세스 존재 확인
+    // kill -0 으로 프로세스 존재 확인.
+    //
+    // NOTE: pid 존재 ≠ 데몬 살아있음. <defunct>(zombie) 프로세스도 kill -0 을
+    // 통과하므로, "데몬이 실제로 응답하는가"의 판정에는 절대 쓰지 않는다 (그 용도는
+    // `daemon_alive()` 의 소켓 connect probe). 이 함수는 stop 경로에서 SIGTERM/
+    // SIGKILL 의 대상 pid 가 아직 살아있는지(=시그널을 보낼 의미가 있는지) 만 본다.
     unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// Liveness via an ACTUAL connection probe — the single source of truth for
+/// "is the daemon up and answering?".
+///
+/// A pid-existence check (`is_running`) is a false-positive trap: a zombie
+/// (<defunct>) daemon left by a force-kill still satisfies `kill(pid, 0)`, so
+/// pid-based liveness reports a dead daemon as alive and blocks restart /
+/// misroutes clients. Connecting to the unix socket can't be fooled this way:
+/// Ok(_) ⇒ a daemon is listening; Err(_) (ENOENT / ECONNREFUSED / …) ⇒ stale.
+fn daemon_alive() -> bool {
+    use std::os::unix::net::UnixStream;
+    UnixStream::connect(paths::socket_path()).is_ok()
+}
+
+/// Install a double-fork into the command's pre_exec so the spawned daemon
+/// reparents to init(1) regardless of how long this CLI process lives.
+///
+/// `process_group(0)` / `setsid()` detach the daemon from the controlling
+/// terminal but do NOT change its PPID — the daemon stays a child of whoever
+/// called spawn(). When that caller is short-lived (the CLI exits) the kernel
+/// reparents the orphan to init, which reaps it. But the same spawn path runs
+/// under the LONG-LIVED `clawket mcp` process (see daemon_autostart.rs); there
+/// the daemon never reparents, and a force-kill leaves a zombie the MCP server
+/// never wait()s. Double-fork fixes both: the post-fork child immediately forks
+/// the real daemon (grandchild) and _exit(0)s, so the daemon is orphaned at
+/// birth and reparents to init unconditionally. The caller must reap the
+/// short-lived intermediate (see `reap_intermediate`).
+///
+/// # Safety
+/// pre_exec runs in the forked child between fork() and exec(), where only
+/// async-signal-safe calls are allowed. fork/setsid/_exit are all in that set
+/// and we touch no allocator/locks here.
+#[cfg(unix)]
+fn install_double_fork(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        cmd.pre_exec(|| {
+            match libc::fork() {
+                -1 => Err(std::io::Error::last_os_error()),
+                0 => {
+                    // Grandchild: detach into its own session, then exec the
+                    // daemon (the outer Command's exec proceeds after Ok).
+                    libc::setsid();
+                    Ok(())
+                }
+                // Intermediate: exit immediately so the grandchild orphans and
+                // reparents to init. _exit (not exit) to skip atexit/flush in
+                // the forked copy.
+                _ => libc::_exit(0),
+            }
+        });
+    }
+}
+
+/// Reap the short-lived intermediate child produced by `install_double_fork`.
+///
+/// The intermediate `_exit(0)`s right after forking the daemon, so this wait()
+/// is near-instant and prevents the intermediate itself from becoming a zombie
+/// under THIS process. The daemon (grandchild) is now init's child and is not
+/// waited on here — it writes its own pid file, which the caller polls.
+#[cfg(unix)]
+fn reap_intermediate(mut child: std::process::Child) {
+    let _ = child.wait();
 }
 
 /// Resolve clawketd log file path. Mirrors daemon/src/paths.rs:
@@ -118,10 +187,15 @@ fn print_output(out: &std::process::Output) {
 /// gets a synchronous "ready" signal, but fall back to "starting" rather
 /// than timing out the hook.
 fn cmd_start() -> Result<()> {
-    if let Some(pid) = read_pid()
-        && is_running(pid)
-    {
-        println!("clawketd: already running (pid={pid})");
+    // Liveness = "does the daemon answer on its socket?", NOT "does a pid
+    // exist?". A zombie pid passes is_running() but the socket connect fails,
+    // so probing the socket lets a force-killed-then-zombied daemon be treated
+    // as dead and restarted cleanly. pid (if any) is read only for the message.
+    if daemon_alive() {
+        match read_pid() {
+            Some(pid) => println!("clawketd: already running (pid={pid})"),
+            None => println!("clawketd: already running"),
+        }
         return Ok(());
     }
 
@@ -162,6 +236,10 @@ fn cmd_start() -> Result<()> {
         // New process group: SIGHUP/SIGINT delivered to the parent's group
         // (e.g. the hook's shell) doesn't reach the daemon.
         cmd.process_group(0);
+        // Double-fork so the daemon reparents to init(1) and never lingers as a
+        // zombie — see install_double_fork. `child` below is the intermediate,
+        // not the daemon; we reap it immediately.
+        install_double_fork(&mut cmd);
     }
 
     let child = cmd.spawn().map_err(|e| {
@@ -170,17 +248,21 @@ fn cmd_start() -> Result<()> {
         )
     })?;
     let child_pid = child.id();
-    // Intentionally drop `child` without wait() — clawketd runs in its own
-    // process group with stdio redirected to the log file, so it becomes a
-    // reparented background process when the CLI exits. No zombie: clawketd
-    // becomes a child of init (pid 1) when this process exits.
+    // Reap the short-lived intermediate (it _exit(0)s right after forking the
+    // daemon, so this is near-instant). The daemon itself is now init's child —
+    // reparented regardless of this CLI's lifetime — and is found below via the
+    // pid file + socket probe, not via this handle.
+    #[cfg(unix)]
+    reap_intermediate(child);
+    #[cfg(not(unix))]
     drop(child);
 
-    // Poll for readiness: pid file appears AND process is alive.
+    // Poll for readiness: pid file appears AND the daemon answers on its socket
+    // (connect probe, not pid existence — a zombie pid must not read as ready).
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(pid) = read_pid()
-            && is_running(pid)
+            && daemon_alive()
         {
             if let Some(path) = &log_path {
                 println!("clawketd: started (pid={pid}, log={})", path.display());
@@ -216,11 +298,17 @@ fn spawn_null_detached(program: &str, extra_args: &[String]) -> Result<()> {
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
+        // Double-fork so the daemon reparents to init(1) (same rationale as
+        // cmd_start) — `child` below is the intermediate, reaped immediately.
+        install_double_fork(&mut cmd);
     }
     let child = cmd
         .spawn()
         .map_err(|e| anyhow::anyhow!("failed to spawn '{program} start': {e}"))?;
     let pid = child.id();
+    #[cfg(unix)]
+    reap_intermediate(child);
+    #[cfg(not(unix))]
     drop(child);
     println!("clawketd: starting (spawned pid={pid}, log=/dev/null)");
     Ok(())

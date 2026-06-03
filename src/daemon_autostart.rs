@@ -184,12 +184,35 @@ fn try_spawn_and_wait() -> Result<()> {
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
+        // Double-fork: this spawn path runs under the LONG-LIVED `clawket mcp`
+        // process, which never wait()s the daemon. Without reparenting, a
+        // force-killed daemon becomes a <defunct> zombie the MCP server holds
+        // forever (the observed bug). The double-fork orphans the daemon at
+        // birth so it reparents to init(1); we reap the intermediate below.
+        //
+        // # Safety
+        // pre_exec runs post-fork/pre-exec where only async-signal-safe calls
+        // are permitted — fork/setsid/_exit qualify and we touch no locks.
+        unsafe {
+            cmd.pre_exec(|| match libc::fork() {
+                -1 => Err(std::io::Error::last_os_error()),
+                0 => {
+                    libc::setsid();
+                    Ok(())
+                }
+                _ => libc::_exit(0),
+            });
+        }
     }
 
     match cmd.spawn() {
         Ok(child) => {
             let pid = child.id();
-            drop(child);
+            // Reap the short-lived intermediate (it _exit(0)s immediately after
+            // forking the daemon). The daemon is now init's child, found via the
+            // socket probe in wait_for_socket — not via this handle.
+            let mut child = child;
+            let _ = child.wait();
             eprintln!("clawket: auto-started clawketd (pid={pid})");
         }
         Err(e) => {
