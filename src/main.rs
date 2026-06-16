@@ -711,7 +711,7 @@ enum CycleAction {
 // ========== Task ==========
 #[derive(Subcommand)]
 enum TaskAction {
-    /// Create a new task (atomic work unit). Unit and cycle are auto-inferred from the active plan/cycle if omitted.
+    /// Create a new task (atomic work unit). `--cycle` is REQUIRED (the daemon enforces it; omitting it returns MISSING_CYCLE_ID naming the active cycle to pass). Unit is auto-inferred from the active plan when omitted.
     /// Status: todo → in_progress → done/cancelled. Blocked for external dependencies.
     Create {
         /// Task title describing the work
