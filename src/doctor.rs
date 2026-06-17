@@ -1404,19 +1404,9 @@ fn run_tier_aware_check(tally: &mut Vec<Severity>) {
 /// (the current `CARGO_PKG_VERSION`). When they diverge the guidance string
 /// must explicitly tell the user to **reinstall**.
 fn run_plugin_install_check(tally: &mut Vec<Severity>) {
-    // Check if the clawket binary itself is reachable (already installed).
-    let bin_candidates = [
-        std::env::var("CLAWKET_BIN")
-            .ok()
-            .map(std::path::PathBuf::from),
-        {
-            // Plugin layout: ~/.claude/plugins/<clawket-version>/bin/clawket
-            let home = std::env::var("HOME").map(std::path::PathBuf::from).ok();
-            home.map(|h| h.join(".claude/plugins"))
-        },
-    ];
-
-    // Locate current executable as the best proxy for "installed".
+    // Locate the running executable. In the installed layout this IS the
+    // plugin's cli binary at `<plugin_root>/bin/clawket`, so the install marker
+    // the gate wrote sits right beside it.
     let self_bin = std::env::current_exe().ok();
     if let Some(ref p) = self_bin {
         println!("  {} clawket binary: {}", Severity::Ok.tag(), p.display());
@@ -1429,58 +1419,27 @@ fn run_plugin_install_check(tally: &mut Vec<Severity>) {
         tally.push(Severity::Warn);
     }
 
-    // Plugin tree: look for any clawket-* directory under ~/.claude/plugins/
-    let mut marker_version: Option<String> = None;
-    let mut marker_path: Option<PathBuf> = None;
-    let home = std::env::var("HOME").map(std::path::PathBuf::from).ok();
-    if let Some(h) = home {
-        let plugins_dir = h.join(".claude/plugins");
-        if plugins_dir.exists() {
-            let found: Vec<_> = std::fs::read_dir(&plugins_dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|e| e.file_name().to_string_lossy().starts_with("clawket"))
-                .collect();
-            if found.is_empty() {
-                println!(
-                    "  {} plugin tree not found under {} — install via Claude Code /plugin install",
-                    Severity::Info.tag(),
-                    plugins_dir.display()
-                );
-                tally.push(Severity::Info);
-            } else {
-                for entry in &found {
-                    println!(
-                        "  {} plugin dir: {}",
-                        Severity::Ok.tag(),
-                        entry.path().display()
-                    );
-                    if marker_version.is_none()
-                        && let Some((v, p)) = read_install_marker(&entry.path())
-                    {
-                        marker_version = Some(v);
-                        marker_path = Some(p);
-                    }
-                }
-                tally.push(Severity::Ok);
-            }
-        } else {
-            println!(
-                "  {} ~/.claude/plugins/ not found — plugin not installed",
-                Severity::Info.tag()
-            );
-            tally.push(Severity::Info);
-        }
-    }
+    // PLUGIN-160 / PLUGIN-161 — install marker vs binary version readout.
+    //
+    // The install gate (`ensureInstalled`) writes the cli component's release
+    // tag to `<plugin_root>/bin/.clawket-version` (e.g. `v0.5.3`) next to the
+    // binary it installs. Anchoring on `current_exe()` makes this check
+    // layout-agnostic — it works for the nested Claude Code cache layout
+    // (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/bin/clawket`)
+    // as well as any legacy flat layout — and reads the marker the gate
+    // actually emits (a plugin-root `.install-marker` was never written, which
+    // made this readout always report "(not found)").
+    let marker = self_bin
+        .as_deref()
+        .and_then(Path::parent)
+        .and_then(read_install_marker);
 
-    // PLUGIN-160 / PLUGIN-161 — marker vs binary version readout.
     let binary_version = env!("CARGO_PKG_VERSION").to_string();
     println!("  binary_version: {binary_version}");
-    match (&marker_version, &marker_path) {
-        (Some(mv), Some(mp)) => {
+    match marker {
+        Some((mv, mp)) => {
             println!("  marker_version: {mv} ({})", mp.display());
-            if mv == &binary_version {
+            if mv == binary_version {
                 println!(
                     "  {} marker_version matches binary_version",
                     Severity::Ok.tag()
@@ -1488,43 +1447,38 @@ fn run_plugin_install_check(tally: &mut Vec<Severity>) {
                 tally.push(Severity::Ok);
             } else {
                 println!(
-                    "  {} marker_version ({mv}) diverges from binary_version ({binary_version}) — run `/plugin update clawket@clawket` to realign install marker, binaries and web bundle (fallback: `/plugin uninstall clawket@clawket && /plugin install clawket@clawket`)",
+                    "  {} marker_version ({mv}) diverges from binary_version ({binary_version}) — run `/plugin update clawket@clawket` to realign binaries and web bundle (fallback: `/plugin uninstall clawket@clawket && /plugin install clawket@clawket`)",
                     Severity::Warn.tag()
                 );
                 tally.push(Severity::Warn);
             }
         }
-        _ => {
+        None => {
+            // No marker beside the binary: a dev/source build (no install
+            // gate ran) or the marker was wiped. Not an error — the version
+            // readouts above still reflect the live binary.
             println!(
-                "  {} marker_version: (not found) — first install pending or marker was wiped; run `/plugin update clawket@clawket` (fallback: `/plugin uninstall clawket@clawket && /plugin install clawket@clawket`)",
+                "  {} marker_version: (not found beside the running binary — dev/source build or pre-install)",
                 Severity::Info.tag()
             );
             tally.push(Severity::Info);
         }
     }
-
-    // Suppress unused variable warning from the candidates array above.
-    let _ = bin_candidates;
 }
 
-/// Read the install marker emitted by `adapters/shared/claude-hooks.cjs::ensureInstalled`.
-/// Marker file is JSON: `{"version": "<semver>", "installed_at": "<iso8601>"}`.
-/// Returns `(version, path)` on success.
-fn read_install_marker(plugin_dir: &Path) -> Option<(String, PathBuf)> {
-    let candidate = plugin_dir.join(".install-marker");
+/// Read the cli install marker that `adapters/shared/claude-hooks.cjs::ensureInstalled`
+/// writes next to the binary: `<bin_dir>/.clawket-version`, containing the
+/// component release tag (e.g. `v0.5.3`). The leading `v` is stripped so the
+/// value compares directly against `CARGO_PKG_VERSION` (`0.5.3`). Returns
+/// `(version, path)` on success.
+fn read_install_marker(bin_dir: &Path) -> Option<(String, PathBuf)> {
+    let candidate = bin_dir.join(".clawket-version");
     let raw = fs::read_to_string(&candidate).ok()?;
-    // Tolerate either JSON or a one-line `version=...` text marker.
-    if let Ok(v) = serde_json::from_str::<Value>(&raw)
-        && let Some(s) = v.get("version").and_then(Value::as_str)
-    {
-        return Some((s.to_string(), candidate));
+    let version = raw.trim().trim_start_matches('v').trim().to_string();
+    if version.is_empty() {
+        return None;
     }
-    for line in raw.lines() {
-        if let Some(rest) = line.trim().strip_prefix("version=") {
-            return Some((rest.trim().to_string(), candidate));
-        }
-    }
-    None
+    Some((version, candidate))
 }
 
 /// i18n: report the CLAWKET_LOCALE / LC_ALL / LANG resolution chain
@@ -2081,6 +2035,7 @@ pub mod project_enabled {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::doctor::read_install_marker;
         use serde_json::json;
 
         #[test]
@@ -2111,6 +2066,30 @@ pub mod project_enabled {
                 "OK branch should not surface remediation hints: {:?}",
                 line.hints
             );
+        }
+
+        #[test]
+        fn read_install_marker_strips_v_prefix() {
+            // The gate writes the component tag (`v0.5.3`); the readout compares
+            // against CARGO_PKG_VERSION (`0.5.3`), so the leading `v` is stripped.
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(".clawket-version"), "v0.5.3\n").unwrap();
+            let (version, path) = read_install_marker(dir.path()).expect("marker found");
+            assert_eq!(version, "0.5.3");
+            assert!(path.ends_with(".clawket-version"));
+        }
+
+        #[test]
+        fn read_install_marker_missing_is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(read_install_marker(dir.path()).is_none());
+        }
+
+        #[test]
+        fn read_install_marker_empty_is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join(".clawket-version"), "  \n").unwrap();
+            assert!(read_install_marker(dir.path()).is_none());
         }
 
         #[test]
