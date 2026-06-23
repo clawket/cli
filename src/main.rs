@@ -489,6 +489,11 @@ enum PlanAction {
         /// Source file path (for imported plans)
         #[arg(long)]
         source_path: Option<String>,
+        /// Opt in to Stop-hook auto-advance: when this plan is active, the
+        /// agent is fed the next task/phase at end of turn instead of stopping
+        /// while work remains. Off by default.
+        #[arg(long)]
+        auto_advance: bool,
     },
     /// View plan details
     View {
@@ -517,6 +522,9 @@ enum PlanAction {
         /// Plan status: draft, active, completed. Use 'approve' command for draft → active.
         #[arg(long)]
         status: Option<String>,
+        /// Toggle Stop-hook auto-advance (true|false). Omit to leave unchanged.
+        #[arg(long)]
+        auto_advance: Option<bool>,
     },
     /// Delete a plan
     Delete {
@@ -4084,6 +4092,7 @@ async fn run_main() -> Result<()> {
                 description,
                 source,
                 source_path,
+                auto_advance,
             } => {
                 output(
                     &client::request(
@@ -4093,6 +4102,7 @@ async fn run_main() -> Result<()> {
                         Some(json!({
                             "project_id": project, "title": title, "description": description,
                             "source": source, "source_path": source_path,
+                            "auto_advance": auto_advance,
                         })),
                     )
                     .await?,
@@ -4108,6 +4118,7 @@ async fn run_main() -> Result<()> {
                 title,
                 description,
                 status,
+                auto_advance,
             } => {
                 let mut body = json!({});
                 if let Some(v) = title {
@@ -4118,6 +4129,9 @@ async fn run_main() -> Result<()> {
                 }
                 if let Some(v) = status {
                     body["status"] = json!(v);
+                }
+                if let Some(v) = auto_advance {
+                    body["auto_advance"] = json!(v);
                 }
                 output(&client::request(&c, "PATCH", &format!("/plans/{id}"), Some(body)).await?);
             }
