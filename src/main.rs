@@ -808,9 +808,11 @@ enum TaskAction {
         /// Filter by project ID
         #[arg(long)]
         project: Option<String>,
-        /// Filter by status: todo, in_progress, blocked, done, cancelled
-        #[arg(long)]
-        status: Option<String>,
+        /// Filter by status: todo, in_progress, blocked, done, cancelled.
+        /// Repeatable or comma-separated to match any of several statuses
+        /// (e.g. `--status todo --status in_progress` or `--status todo,in_progress`).
+        #[arg(long, value_delimiter = ',')]
+        status: Vec<String>,
         /// Filter by Claude Code agent_id (from SubagentStart hook)
         #[arg(long)]
         agent_id: Option<String>,
@@ -4469,11 +4471,18 @@ async fn run_main() -> Result<()> {
                 };
                 let limit_filter = limit.map(|n| n.to_string());
                 let offset_filter = offset.map(|n| n.to_string());
+                // Multi-value status (LM-11092): the daemon's status filter
+                // accepts a comma-separated list and matches any of them.
+                let status_filter = if status.is_empty() {
+                    None
+                } else {
+                    Some(status.join(","))
+                };
                 let qs = query_string(&[
                     ("unit_id", &unit),
                     ("plan_id", &plan),
                     ("project_id", &project),
-                    ("status", &status),
+                    ("status", &status_filter),
                     ("agent_id", &agent_id),
                     ("cycle_id", &cycle_filter),
                     ("label", &label),
